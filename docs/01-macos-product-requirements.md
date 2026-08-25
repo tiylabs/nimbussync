@@ -1,11 +1,11 @@
 # Cloudreve macOS 客户端产品需求文档
 
 > 文档类型：产品需求文档（PRD）  
-> 状态：Draft 1.0  
+> 状态：Reviewed Draft 1.1
 > 日期：2026-08-25  
 > 目标产品暂定名：Cloudreve for macOS  
 > 参考实现：[`cloudreve/desktop@7144740`](https://github.com/cloudreve/desktop/tree/71447408df6db38362703fbbb61dc534ea210470)  
-> 配套技术调研：[Cloudreve Desktop macOS 复刻方案调研](./cloudreve-desktop-macos-port-research.md)
+> 配套技术调研：[Cloudreve Desktop macOS 复刻方案调研](./00-macos-port-research.md)
 
 ## 1. 文档目的
 
@@ -38,6 +38,7 @@ Cloudreve for macOS 是面向自托管 Cloudreve 用户的原生菜单栏与 Fin
 - 正确性优先于实时性；SSE 丢失时必须依靠 reconciliation 恢复。
 - 不静默覆盖冲突文件，不静默删除用户的远端数据。
 - File Provider Extension 不依赖主应用持续运行。
+- 菜单栏主应用负责实时事件与周期校准；用户退出或禁用登录启动后，Finder 基础读写仍可工作，但产品必须明确显示实时性降级。
 - 凭据只进入 Keychain，不进入普通配置、数据库、崩溃报告或日志。
 - 遵循 macOS 平台交互，不复制 Windows 控件和任意同步根行为。
 
@@ -50,6 +51,7 @@ Cloudreve for macOS 是面向自托管 Cloudreve 用户的原生菜单栏与 Fin
 5. 不支持绕过 TLS 验证的“不安全连接”模式。
 6. 不保证复用或兼容 Windows 客户端本地 inventory 数据库。
 7. 不把 SSE 当作唯一变化来源或永久事件日志。
+8. 不承诺所有 Cloudreve 存储 Provider 天然支持跨进程续传；只有通过能力门禁的 Provider 才进入 1.0 可写支持矩阵。
 
 ## 3. 参考项目功能与布局盘点
 
@@ -253,7 +255,7 @@ url_input
 | 版本 | 范围 |
 |---|---|
 | Technical Preview | 单 Domain、枚举、完整按需下载、基本上传、Keychain |
-| 0.5 Beta | P0：多 Domain、双向同步、SSE/reconciliation、冲突、任务状态 |
+| 0.5 Beta | P0：多 Domain、双向同步、SSE/reconciliation、冲突、任务状态；写能力限于通过协议门禁的服务端/Provider |
 | 1.0 | P0 + P1：Finder 增强、Ignore、缩略图、诊断、多语言、任务控制 |
 | 1.x | P2：暂停/继续、选择性同步、网络策略和高级缓存策略 |
 
@@ -319,6 +321,7 @@ Finder
 - 最近活动默认展示最近 20 项，可定位 Finder；
 - Footer 显示全局状态，不得在离线或 degraded 时显示“已是最新”；
 - 状态更新采用本地事件流，轮询只作为降级方案。
+- 用户退出菜单栏应用或关闭登录启动后，Popover 不再可用；Finder 仍按系统请求启动 Extension，重新打开应用后状态从持久化数据恢复。
 
 ### 6.3 添加网盘窗口
 
@@ -388,13 +391,13 @@ macOS 不展示“选择任意本地文件夹”。应明确告知用户：网�
 | FR-ONB-002 | 首次启动可立即添加网盘 | P0 | 完成后 Domain 出现在 Finder |
 | FR-ONB-003 | 无网盘时菜单栏显示空状态 | P0 | 提供“添加网盘”，不显示“已同步” |
 | FR-ONB-004 | 通知权限按需请求 | P0 | 首次产生需通知事件前说明用途，拒绝后功能可继续 |
-| FR-ONB-005 | 登录项由用户控制 | P0 | 开关状态与 `SMAppService` 实际状态一致 |
+| FR-ONB-005 | 菜单栏主应用登录启动由用户控制 | P0 | 开关状态与 `SMAppService.mainApp` 实际状态一致；关闭后解释实时事件与通知会暂停，但 Finder 按需访问仍可用 |
 
 ### 7.2 站点连接与授权
 
 | ID | 需求 | 优先级 | 验收标准 |
 |---|---|---:|---|
-| FR-AUTH-001 | 接受合法 HTTP/HTTPS Cloudreve URL | P0 | 解析失败时在输入框就地提示 |
+| FR-AUTH-001 | 接受合法 HTTPS Cloudreve URL | P0 | Release 拒绝明文 HTTP；仅 Debug/测试允许 loopback HTTP，解析或 scheme 不合规时就地提示 |
 | FR-AUTH-002 | 连接前请求 site ping | P0 | 区分 DNS、TLS、HTTP、API 和版本错误 |
 | FR-AUTH-003 | 支持 Cloudreve v4 OAuth + PKCE | P0 | 使用系统浏览器或 `ASWebAuthenticationSession` |
 | FR-AUTH-004 | 校验 OAuth state | P0 | state 不匹配时拒绝 token exchange |
@@ -418,15 +421,17 @@ macOS 不展示“选择任意本地文件夹”。应明确告知用户：网�
 | FR-DOM-005 | 可从设置在 Finder 中打开 Domain | P0 | Finder 定位到正确根目录 |
 | FR-DOM-006 | 可打开 Cloudreve 站点 | P1 | 使用默认浏览器和 HTTPS 原地址 |
 | FR-DOM-007 | 可移除 Domain | P0 | 明确提示“远端文件不会删除”；移除操作不调用远端 delete API |
-| FR-DOM-008 | 清理本地缓存与元数据 | P0 | Domain 移除后清除本地内容、journal 和 Keychain 项，不影响其他 Domain |
+| FR-DOM-008 | 清理本地缓存与元数据 | P0 | 安全移除完成后清除可删除的本地内容、journal 和 Keychain 项；系统保留的 dirty user data 交给用户，不影响其他 Domain |
 | FR-DOM-009 | 支持暂停/继续 Domain | P2 | 暂停期间不主动上传/拉取，恢复后 reconciliation |
 | FR-DOM-010 | 支持禁用但保留配置 | P2 | Finder Domain 可移除，重新启用后 identity 与配置复用 |
+| FR-DOM-011 | 阻止同账号的重复或重叠远端范围 | P0 | 对规范化后相同、祖先或子孙 remote root 拒绝重复添加，避免两个 Domain 对同一远端树并发写入 |
+| FR-DOM-012 | 移除前保护未上传数据 | P0 | 存在 dirty item、unknown outcome 或未完成写操作时禁止直接清空；须先同步、取消移除，或由系统保留用户数据到可见位置 |
 
 ### 7.4 Finder 枚举与按需下载
 
 | ID | 需求 | 优先级 | 验收标准 |
 |---|---|---:|---|
-| FR-FP-001 | 枚举根目录和任意子目录 | P0 | 正确处理分页、空目录和深层目录 |
+| FR-FP-001 | 枚举根目录和任意子目录 | P0 | 正确处理分页、空目录和深层目录；并发创建/改名/删除时无静默漏项或重项 |
 | FR-FP-002 | 使用稳定 item identifier | P0 | rename/move 后 identifier 不因路径变化而改变 |
 | FR-FP-003 | 显示 dataless 文件 | P0 | 不下载内容也能展示名称、类型、大小和修改时间 |
 | FR-FP-004 | 打开文件时下载完整内容 | P0 | 校验长度与版本，取消操作能及时终止网络请求 |
@@ -436,23 +441,30 @@ macOS 不展示“选择任意本地文件夹”。应明确告知用户：网�
 | FR-FP-008 | 正确映射文件类型和时间 | P0 | Finder 信息与 Cloudreve metadata 一致 |
 | FR-FP-009 | 根目录和只读 item 能力正确 | P0 | 不允许的删除、移动、写入不在 UI 中伪装可用 |
 | FR-FP-010 | 不支持的符号链接有明确策略 | P1 | 默认不跟随外部目标；过滤或只读展示行为有测试 |
+| FR-FP-011 | 维护 working set 与 materialized container 集合 | P0 | 远端变化能更新已落盘目录；总 item 数增长时不要求把全量树长期作为 working set |
+| FR-FP-012 | 明确包、别名和硬链接策略 | P1 | package 目录按目录同步；alias 当普通文件；不保留跨 item hard link 关系，行为写入兼容矩阵 |
+| FR-FP-013 | 明确 macOS 扩展元数据边界 | P1 | 1.0 只保证 data fork 与 Cloudreve 可表达的时间/权限 metadata；Finder 标签、注释、任意 xattr、resource fork、POSIX ACL 和 sparse allocation 不承诺跨设备同步 |
 
 ### 7.5 本地操作上传
 
 | ID | 需求 | 优先级 | 验收标准 |
 |---|---|---:|---|
-| FR-UP-001 | 创建文件自动上传 | P0 | Cloudreve 出现同一 item，Finder 返回最终版本 |
-| FR-UP-002 | 创建目录自动同步 | P0 | 远端目录创建成功后返回稳定 ID |
+| FR-UP-001 | 创建文件自动上传 | P0 | Cloudreve 出现同一 item，Finder 返回最终版本；响应丢失后重试不产生重复文件 |
+| FR-UP-002 | 创建目录自动同步 | P0 | 远端目录创建成功后返回稳定 ID；callback 重放不重复建目录 |
 | FR-UP-003 | 修改文件自动上传 | P0 | 使用 previous version/ETag 防止静默覆盖 |
 | FR-UP-004 | rename/move 传播到远端 | P0 | 不通过重新上传完整内容模拟移动 |
-| FR-UP-005 | Finder 删除传播到远端 | P0 | 遵循 Cloudreve 删除语义；根目录不可删除 |
+| FR-UP-005 | Finder 移到废纸篓与恢复 | P0 | 仅在删除语义通过能力门禁后启用；映射 Cloudreve 软删除/restore，保留原父级并支持 Finder 恢复 |
 | FR-UP-006 | 支持空文件 | P0 | 0 字节文件可创建、覆盖和下载 |
-| FR-UP-007 | 支持 Cloudreve 各上传 Provider | P0 | Local/S3/OneDrive/七牛/又拍建立 contract tests |
-| FR-UP-008 | 上传任务持久化 | P0 | Extension 被终止后任务可恢复或明确重新排队 |
-| FR-UP-009 | 真正分片续传 | P0 | 已完成分片不因进程重启全部重传；源变化时安全废弃旧 session |
+| FR-UP-007 | 支持发布矩阵内的上传 Provider | P0 | Local/S3/OneDrive/七牛/又拍逐一建立 contract test；未通过者不宣称支持，而不是共用一个“已支持”结论 |
+| FR-UP-008 | 上传任务持久化 | P0 | Extension 被终止后，等待系统重放 callback 并重新提供内容 URL；不得尝试打开已失效的临时路径 |
+| FR-UP-009 | 真正分片续传 | P0 | callback 重放且源 fingerprint 一致时复用已完成分片；源变化或服务端无法确认 session 时安全废弃旧 session |
 | FR-UP-010 | 上传进度可观察 | P0 | 进度、速度、处理字节至少每秒更新一次 |
 | FR-UP-011 | 用户可取消任务 | P1 | 取消后不留下假成功 item，远端 session 按策略保留或清理 |
 | FR-UP-012 | 用户可重试失败任务 | P1 | 重试保留 item identity 和可恢复 session |
+| FR-UP-013 | File Provider callback 重放幂等 | P0 | create 使用系统稳定的临时 item identifier 关联原 operation；modify/delete 使用 item、base version 和字段集合关联，不重复创建或误删 |
+| FR-UP-014 | 原子处理组合字段修改 | P0 | filename、parent、contents 同次变化时作为一个持久 operation 处理；不能出现新扩展名配旧内容的可见成功状态 |
+| FR-UP-015 | 串行化同一 item 的连续编辑 | P0 | 上传期间再次保存会形成后继版本，不让旧上传结果覆盖较新的本地内容 |
+| FR-UP-016 | 永久删除与递归删除受控 | P0 | 只有从废纸篓永久删除时调用永久删除语义；非递归非空目录返回 directory-not-empty，部分失败不标记整批成功 |
 
 ### 7.6 远端事件与一致性恢复
 
@@ -463,11 +475,12 @@ macOS 不展示“选择任意本地文件夹”。应明确告知用户：网�
 | FR-EVT-003 | journal sequence 作为 sync anchor | P0 | 同一 anchor 重放得到一致结果 |
 | FR-EVT-004 | 远端变化通知 File Provider | P0 | 调用 `signalEnumerator`，正常网络下 p95 5 秒内在 Finder 可见 |
 | FR-EVT-005 | 新订阅触发 reconciliation | P0 | 不假设订阅前所有事件仍可恢复 |
-| FR-EVT-006 | 事件缺口触发 reconciliation | P0 | 不继续报告“已同步”直到校准完成 |
+| FR-EVT-006 | 事件缺口或恢复状态不明时触发 reconciliation | P0 | 服务端无单调事件 ID 时，不声称能精确检测任意缺口；异常断流、未知事件或无法确认 resumed 时一律校准，且不报告“已同步” |
 | FR-EVT-007 | anchor 过期处理 | P0 | 返回 sync anchor expired，系统可重新枚举 |
 | FR-EVT-008 | 周期安全校准 | P1 | 即使 SSE 一直连接，也能发现摘要不一致 |
 | FR-EVT-009 | 离线恢复 | P0 | 网络恢复后自动重连并收敛，无需用户重启应用 |
 | FR-EVT-010 | SSE 降级可见 | P0 | 菜单栏和网盘设置显示“实时事件不可用，正在定期检查” |
+| FR-EVT-011 | 主应用未运行时正确降级 | P0 | Extension 通过目标目录枚举和按需 reconciliation 保证正确性；重新打开主应用后恢复 SSE，不把离线时段误报为实时同步 |
 
 ### 7.7 任务与状态
 
@@ -488,7 +501,7 @@ macOS 不展示“选择任意本地文件夹”。应明确告知用户：网�
 | ID | 需求 | 优先级 | 验收标准 |
 |---|---|---:|---|
 | FR-CNF-001 | 使用 ETag/version 检测冲突 | P0 | stale version 不会被当作普通重试覆盖远端 |
-| FR-CNF-002 | 冲突持久化 | P0 | 重启后仍在“需要处理”列表中 |
+| FR-CNF-002 | 冲突持久化 | P0 | 重启后仍在“需要处理”列表中；本地冲突内容由系统 pending item 或受控副本保护，不依赖旧 callback URL |
 | FR-CNF-003 | 保留远端版本 | P0 | 丢弃本地修改前二次确认，并下载当前远端版本 |
 | FR-CNF-004 | 覆盖远端版本 | P0 | 再次校验版本；若远端又变化，继续保持冲突 |
 | FR-CNF-005 | 保留两个版本 | P0 | 本地版本保存为唯一冲突副本并上传，不覆盖任一现有版本 |
@@ -516,8 +529,8 @@ File Provider Domain 是远端文件树的系统视图，不能完全复制普�
 |---|---|---:|---|
 | FR-IGN-001 | 每个 Domain 可配置 gitignore 风格规则 | P1 | 一行一条，保存前验证语法 |
 | FR-IGN-002 | 匹配的远端 item 不进入枚举 | P1 | Finder 不展示被排除 item |
-| FR-IGN-003 | 本地创建匹配 item 时阻止上传 | P1 | 返回清晰错误，不留下长期“本地存在但永不同步”的假状态 |
-| FR-IGN-004 | 修改规则触发重新枚举 | P1 | 新增排除项前提示可能移除本地 materialized 内容 |
+| FR-IGN-003 | 本地创建匹配 item 时排除同步 | P1 | 返回系统 `excludedFromSync` 语义并保留本地内容，明确标识“仅保留在此 Mac”，不形成无限重试 |
+| FR-IGN-004 | 修改规则触发重新枚举 | P1 | 新增排除项前列出受影响的 materialized/dirty item；dirty item 未同步或未另存前禁止从 Domain 视图移除 |
 | FR-IGN-005 | 根目录不可被规则排除 | P1 | 规则验证阶段拒绝 |
 | FR-IGN-006 | 排除不删除远端 | P1 | 添加规则不得调用 Cloudreve delete API |
 
@@ -529,7 +542,7 @@ File Provider Domain 是远端文件树的系统视图，不能完全复制普�
 | FR-SET-002 | 跟随系统浅色/深色 | P0 | 无需重启切换 |
 | FR-SET-003 | 通知总开关与分类开关 | P1 | 凭据、冲突、永久失败可分别控制 |
 | FR-SET-004 | 语言选择 | P1 | 跟随系统或手动选择，切换无需重启主 UI |
-| FR-SET-005 | 日志文件开关 | P1 | 明确哪些设置需重启 Agent/Extension |
+| FR-SET-005 | 日志文件开关 | P1 | 明确哪些设置需重启主应用或等待 Extension 下次启动生效 |
 | FR-SET-006 | 日志级别 | P1 | Trace/Debug/Info/Warn/Error，默认 Info |
 | FR-SET-007 | 日志保留 | P1 | 可选 3/5/7/10 文件或等效大小策略 |
 | FR-SET-008 | 打开日志目录 | P1 | Finder 打开 App Group 中可访问的诊断目录 |
@@ -574,13 +587,17 @@ File Provider Domain 是远端文件树的系统视图，不能完全复制普�
 
 | ID | 需求 | 优先级 | 验收标准 |
 |---|---|---:|---|
-| FR-LIFE-001 | 关闭设置不退出同步 | P0 | Agent/File Provider 继续运行 |
-| FR-LIFE-002 | 菜单“退出”语义明确 | P0 | 主 UI/Agent 退出后 File Provider 仍能按系统请求启动 Extension |
+| FR-LIFE-001 | 关闭设置不退出同步 | P0 | 菜单栏主应用和 File Provider 继续运行 |
+| FR-LIFE-002 | 菜单“退出”语义明确 | P0 | 主应用退出后 SSE、周期校准和通知暂停；File Provider 仍能按系统请求启动 Extension |
 | FR-LIFE-003 | 睡眠唤醒恢复 | P0 | 自动恢复网络、SSE 和未完成任务 |
 | FR-LIFE-004 | Extension 强杀恢复 | P0 | 无静默丢任务、无重复远端写入 |
 | FR-LIFE-005 | 升级迁移 | P0 | 数据库迁移原子化，失败可回滚到可启动状态 |
 | FR-LIFE-006 | 单实例主应用 | P1 | deep link 激活已有实例而非创建冲突窗口 |
 | FR-LIFE-007 | 自动更新 | P2 | 签名更新、发布通道和回滚策略另行设计 |
+| FR-LIFE-008 | 系统重放与 reimport | P0 | 正确处理 `mayAlreadyExist`、deletion-conflicted 与 import 完成回调，不复制已有远端 item |
+| FR-LIFE-009 | 升级期间跨版本进程隔离 | P0 | 旧 Extension 遇到不兼容 schema 只读失败，新版本完成迁移前不并发写旧结构 |
+| FR-LIFE-010 | 卸载前安全清理 | P1 | 提供“准备卸载”入口；先处理 dirty 数据，再移除所有 Domain、登录启动和本地凭据 |
+| FR-LIFE-011 | 数据库损坏安全修复 | P0 | 先隔离原库并保护 pending/dirty 数据；仅 metadata 可重建，不能用空库覆盖未确认 operation |
 
 ## 8. 状态与业务规则
 
@@ -629,6 +646,8 @@ healthy
 - `error`：当前操作失败；
 - `excluded`：被排除规则过滤，不进入 Finder 视图。
 
+`materialized`/`dataless` 是系统所有的缓存状态，本地数据库只能通过 File Provider 的 materialized set 通知维护可恢复的镜像，不能把一次扫描结果当作永久真相。
+
 ### 8.3 任务状态
 
 ```text
@@ -646,9 +665,9 @@ queued → running → succeeded
 
 ### 8.4 删除规则
 
-1. Finder 内删除普通 item：传播为远端删除。
-2. 远端删除：从 Finder 移除对应 item 和本地 materialized 内容。
-3. 移除 Domain：只删除本地 Domain、缓存、journal、配置和凭据，不删除远端 item。
+1. Finder 将普通 item 移到废纸篓：若服务端门禁通过，则映射 Cloudreve 软删除并把 item 保留在 File Provider trash/working set；恢复映射 Cloudreve restore。
+2. Finder 从废纸篓永久删除：才调用经验证的永久删除语义；远端删除后从 Finder 和本地 materialized 内容中移除。
+3. 移除 Domain：不调用远端删除；先等待或处理 dirty/unknown-outcome operation，再使用系统的保留 dirty user data 模式，最后清理可安全删除的缓存、journal、配置和凭据。
 4. 清除历史/日志：不得删除 item 或远端数据。
 5. 任何批量破坏性操作都必须先解析精确 Domain 和 item 范围。
 
@@ -672,10 +691,13 @@ queued → running → succeeded
 | 磁盘空间不足 | 停止下载，返回系统可识别错误，保留可重试状态 |
 | 上传分片失败 | 只重试失败分片，达到上限后进入 retry_wait/failed |
 | Extension 被系统终止 | 下次启动从 operation/upload session 恢复 |
-| SQLite 损坏 | 停止写操作、保留诊断，允许重建 metadata 并全量校准 |
+| 上传 callback 被重放 | 使用系统临时 item ID 或稳定 item/base version 找回原 operation；拿到新的内容 URL 并校验 fingerprint 后续传 |
+| SQLite 损坏 | 停止写操作并隔离原库；从可信备份、File Provider pending set/callback 重放恢复未确认动作后，才重建 metadata 并全量校准 |
 | 远端 item ID 不稳定 | 使用 identity mapping；无法确认身份时不执行破坏性操作 |
 | 同名/大小写碰撞 | 显示明确错误或受控改名，不静默隐藏其中一个文件 |
 | 私有 CA 不受信 | 提示证书信任错误，引导安装 CA；不允许直接忽略验证 |
+| 主应用未运行 | Finder 已缓存内容和按需请求继续；远端实时事件、周期校准与通知标为暂停，启动应用后先 reconciliation 再恢复 healthy |
+| 移除时存在 dirty item | 阻止无提示清空，提供继续同步、保留到系统返回位置或取消移除 |
 
 ## 10. 非功能需求
 
@@ -694,18 +716,28 @@ queued → running → succeeded
 | 主应用空闲内存 | 建议 ≤ 150 MB |
 | Extension 常态内存 | 建议 ≤ 150 MB，峰值不得随总 item 数线性无限增长 |
 | UI 主线程 | 网络、SQLite、哈希和图片解码不得阻塞主线程 |
+| 枚举 page token | 不超过 File Provider 的 500-byte 限制，跨页顺序稳定 |
+| 临时传输空间 | 有按 Domain 上限与启动清理；不得长期复制整份 materialized 文件作为第二缓存 |
 
 ### 10.2 可靠性目标
 
 - 不允许已确认写入被静默丢失；
 - 相同 operation 重放不产生重复文件或重复删除；
-- 应用/Agent/Extension 任一进程异常终止后可自动恢复；
+- 主应用或 Extension 任一进程异常终止后可自动恢复；
 - journal 和数据库写入使用事务；
 - 任务成功回调前持久化最终远端版本；
 - 10,000 item 测试集在事件丢失后可通过 reconciliation 收敛；
+- File Provider callback/reimport 重放不会重复创建、重复删除或覆盖较新内容；
 - 若启用匿名稳定性统计，目标 crash-free session ≥ 99.5%。
 
-### 10.3 安全与隐私
+### 10.3 资源与能耗
+
+- 菜单栏主应用不得使用无等待轮询维持 SSE 或状态刷新；空闲时由事件和有上限定时器驱动；
+- 周期 reconciliation 对多 Domain 加随机抖动，用户交互和 File Provider 请求优先；
+- 低电量、睡眠唤醒和受限网络下可以延后非紧急全量校准，但不得延后用户正在等待的下载或写入确认；
+- Rust/Swift 网络任务必须响应系统取消，临时文件与上传 session 按明确保留策略回收。
+
+### 10.4 安全与隐私
 
 - token、OAuth code、上传签名 URL、Authorization Header 不得写日志；
 - Keychain item 按 Domain 隔离，并使用最小 Access Group；
@@ -713,11 +745,12 @@ queued → running → succeeded
 - OAuth 使用 state + PKCE；
 - URL scheme 回调验证来源数据，不信任 route 参数中的 user ID/远端路径；
 - 网络只访问用户配置实例和上传流程返回的受信端点；
+- Release 不通过明文 HTTP 发送 OAuth code、token 或文件内容；私有部署使用系统信任的证书或安装私有 CA；
 - 支持系统代理和系统信任链；
 - 默认不收集文件名、路径、服务器地址和使用统计；
 - 诊断导出必须显式由用户触发。
 
-### 10.4 兼容性
+### 10.5 兼容性
 
 - 建议最低 macOS 13，最终版本在 Spike 后确认；
 - 建议发布 universal2，支持 Apple Silicon 和 Intel；
@@ -762,9 +795,9 @@ queued → running → succeeded
 
 ### AC-003：完整双向修改
 
-1. Finder 创建、修改、移动、重命名、删除文件；
+1. Finder 创建、修改、移动、重命名文件，并分别执行移到废纸篓、恢复和永久删除；
 2. Cloudreve Web 端逐项出现对应变化；
-3. Web 端重复上述操作；
+3. Web 端重复上述操作，包括软删除和恢复；
 4. Finder 在目标延迟内更新；
 5. 无重复 item、无错误路径、无静默覆盖。
 
@@ -781,10 +814,11 @@ queued → running → succeeded
 
 1. 上传一个多分片大文件；
 2. 完成部分分片后强杀 Extension；
-3. 重新触发 File Provider；
-4. 继续同一远端 session 或经服务端确认后安全重建；
-5. 已完成分片不全部重传；
-6. 最终文件内容与原文件一致。
+3. 验证系统重放 create/modify callback，并为同一待同步版本重新提供有效内容 URL；
+4. 客户端通过稳定 callback identity 找回原 operation，并验证新内容 fingerprint；
+5. 继续同一远端 session，或仅在服务端确认旧 session 无效后安全重建；
+6. fingerprint 一致时已完成分片不全部重传；不一致时旧 session 不得混入新内容；
+7. 最终文件内容与最新待同步本地版本一致。
 
 ### AC-006：三类冲突处理
 
@@ -809,10 +843,12 @@ queued → running → succeeded
 
 1. 从设置选择移除；
 2. 确认文案说明远端不受影响；
-3. Domain 从 Finder 消失；
-4. 本地缓存、metadata 和 Keychain secret 被清理；
-5. Cloudreve 远端文件完整保留；
-6. 其他 Domain 不受影响。
+3. 先制造一个未上传本地修改和一个结果未知 operation，验证客户端阻止直接清空；
+4. 选择继续同步，或使用系统保留 dirty user data 的移除模式并确认返回位置可访问；
+5. Domain 从 Finder 消失；
+6. 可安全清理的本地缓存、metadata 和 Keychain secret 被清理；
+7. Cloudreve 远端文件完整保留；
+8. 其他 Domain 不受影响。
 
 ### AC-009：文件系统边界
 
@@ -821,6 +857,7 @@ queued → running → succeeded
 - 0 字节文件；
 - 超大文件；
 - 10,000 item 单目录；
+- macOS package 目录、Finder alias、hard link、sparse file、resource fork 与 xattr；
 - Unicode 组合字符；
 - 仅大小写不同的名称；
 - 长路径和非法名称；
@@ -831,12 +868,29 @@ queued → running → succeeded
 在下载、上传、rename 和 reconciliation 中分别：
 
 - 强杀 Extension；
-- 强杀 Agent；
+- 强杀菜单栏主应用；
 - 退出主应用；
 - 睡眠并唤醒；
 - 重启 macOS。
 
+另在存在 pending upload/unknown outcome 时注入 SQLite/WAL 损坏，验证客户端隔离原库、保留 Keychain 恢复材料并通过系统 callback/pending set 重建事实，不自动覆盖为空状态。
+
 最终状态必须收敛，且无重复远端操作或静默数据丢失。
+
+### AC-011：后台与 working set 降级
+
+1. 在已 materialized 目录中浏览并打开若干文件；
+2. 退出菜单栏主应用，在 Web 端修改已 materialized 目录和从未访问目录；
+3. Finder 按需访问时启动 Extension，对目标目录执行校准，不误报全局 healthy；
+4. 重新打开主应用，先完成事件重订阅和 reconciliation，再恢复实时状态；
+5. 已 materialized 目录、working set 与远端最终一致，未要求把 100,000 item 全部常驻内存。
+
+### AC-012：重复范围、升级与卸载
+
+1. 同账号已添加 `/团队` 后，拒绝再次添加 `/团队`、`/团队/项目` 或其祖先范围；
+2. 在旧 Extension 尚可能存活时升级应用，验证 schema fencing 阻止跨版本错误写入；
+3. 使用“准备卸载”处理 dirty item 并移除全部 Domain；
+4. 删除应用并重启后，无失联 Domain、登录项或孤立敏感凭据。
 
 ## 13. 发布阻断条件
 
@@ -845,10 +899,18 @@ queued → running → succeeded
 - 已知路径会静默覆盖本地或远端新版本；
 - Domain 移除可能删除远端文件；
 - token、签名 URL 或 OAuth code 进入普通日志；
+- Release 构建允许向明文 HTTP 端点发送凭据或文件内容；
 - SSE 丢失后无法自动 reconciliation；
 - Extension 重启导致任务假成功或重复创建文件；
+- create/modify callback 重放无法关联原 operation，或恢复上传依赖已失效的临时路径；
+- 服务端创建操作缺少幂等键或可证明的后置条件，响应丢失时可能生成重复 item；
 - Cloudreve item identity 尚未验证；
+- 目录分页在并发变更时可能无提示漏项/重项；
+- 同账号可配置重叠远端根并产生双写；
 - 大小写/Unicode 碰撞可能删除错误 item；
+- Domain 移除或排除规则可能丢弃未上传内容；
+- Finder 普通删除被映射为不可恢复的远端永久删除，或 trash/restore 状态无法一致收敛；
+- 数据库自动重建会丢弃 pending operation、upload session 或冲突证据；
 - 未完成签名、公证和升级迁移测试；
 - 核心上传 Provider 无真实服务端 contract test。
 
@@ -864,7 +926,9 @@ queued → running → succeeded
 | 自动更新方案 | 1.0 后或 Beta 冻结前决定 | Beta 前 |
 | partial fetch | P2；完整下载先行 | 大文件 Spike 后 |
 | Ignore 的最终产品文案 | “排除规则” | UX 设计阶段 |
-| 退出菜单语义 | 退出 UI/Agent，不禁用 File Provider | Beta 前实机验证 |
+| 退出菜单语义 | 退出菜单栏主应用并暂停实时事件/通知，不禁用 File Provider | Beta 前实机验证 |
+| Domain 移除策略 | 默认保护 dirty user data；无 dirty 数据才完整清理 | File Provider Spike 后 |
+| Finder 删除语义 | 按服务端门禁显示“移到 Cloudreve 回收站”或“删除”，不猜测可恢复性 | 协议验证后 |
 | 匿名遥测 | 默认无遥测 | 如引入需单独 PRD |
 
 ## 15. 参考源码证据
@@ -894,7 +958,9 @@ queued → running → succeeded
 - [Synchronizing the File Provider Extension](https://developer.apple.com/documentation/fileprovider/synchronizing-the-file-provider-extension)
 - [Synchronizing files using File Provider extensions](https://developer.apple.com/documentation/fileprovider/synchronizing-files-using-file-provider-extensions)
 - [WWDC21: Sync files to the cloud with FileProvider on macOS](https://developer.apple.com/videos/play/wwdc2021/10182/)
+- [NSFileProviderReplicatedExtension](https://developer.apple.com/documentation/fileprovider/nsfileproviderreplicatedextension)
+- [NSFileProviderManager](https://developer.apple.com/documentation/fileprovider/nsfileprovidermanager)
 
 ---
 
-本文档中 P0 + P1 是目标 1.0 的功能范围。任何与 File Provider 实机行为冲突的需求，应先更新本文档和对应验收标准，再修改实现；不能通过保留普通目录 watcher 的方式绕开系统同步模型。
+本文档中 P0 + P1 是目标 1.0 的功能范围，但远端写能力以服务端与 Provider 能力矩阵为前置条件。任何与 File Provider 实机行为或 Cloudreve 实测契约冲突的需求，应先同步更新本文档、技术架构和对应验收标准，再修改实现；不能通过保留普通目录 watcher、盲目路径写入或降低数据保护要求来绕开系统同步模型。

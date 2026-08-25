@@ -1,6 +1,6 @@
 # Cloudreve for macOS 技术选型与架构设计
 
-> 文档状态：Architecture Baseline 1.0  
+> 文档状态：Architecture Baseline 1.1
 > 日期：2026-08-25  
 > 目标版本：Technical Preview、0.5 Beta、1.0  
 > 输入文档：[macOS 复刻方案调研](./00-macos-port-research.md)、[macOS 客户端产品需求](./01-macos-product-requirements.md)  
@@ -12,13 +12,13 @@ Cloudreve for macOS 采用原生多进程架构：
 
 - 使用 **Swift 6、SwiftUI 和少量 AppKit** 实现菜单栏、窗口、设置、通知和系统生命周期；
 - 使用 **`NSFileProviderReplicatedExtension`** 提供 Finder Domain、占位文件、按需下载、双向修改和空间释放；
-- 使用独立的 **File Provider UI Extension** 承接 Finder 自定义操作和需要打开主应用的交互；
-- 使用独立的 **Login Item Agent** 维护 SSE、周期校准和后台通知，但不把它作为同步正确性的唯一前提；
+- 使用 **File Provider 非 UI action** 执行“立即检查更新”等无交互动作，使用独立的 **File Provider UI Extension** 承接认证恢复、冲突导航等必须呈现界面的动作；
+- 由常驻菜单栏主应用维护 SSE、周期校准和通知，并通过 **`SMAppService.mainApp`** 选择性登录启动；1.0 不再增加职责重复的 Login Item helper 进程；
 - 将参考项目中可复用的 Cloudreve API、上传 Provider、分片上传和加密能力重构为 **Rust 静态 `CloudreveCore.xcframework`**；
 - 使用 **UniFFI** 生成类型安全的 Swift 接口，不向 Swift 暴露 Tokio、数据库连接、Rust trait object 或内部路径类型；
-- 使用 **App Group + 分 Domain SQLite WAL** 保存 metadata、change journal、operation、任务和恢复状态；
+- 使用 **App Group + 分 Domain SQLite WAL** 保存 metadata、目录快照、materialized set、change journal、operation、任务和恢复状态；
 - 使用 **Keychain Access Group** 保存 OAuth 凭据以及上传会话中的签名 URL、回调密钥等临时秘密；
-- 使用 **SQLite 作为跨进程事实源，Darwin Notification 作为无载荷唤醒信号**，不建立 App、Agent、Extension 之间的强 RPC 依赖；
+- 使用 **SQLite 作为跨进程事实源，Darwin Notification 作为无载荷唤醒信号**，不建立 App 与 Extension 之间的强 RPC 依赖；
 - 使用 **Cloudreve SSE 作为变化提示，本地 journal 作为 File Provider sync anchor，reconciliation 作为最终一致性机制**；
 - 1.0 采用 **macOS 13+、universal2、Developer ID 站外分发、Hardened Runtime 和 Apple 公证**；自动更新与 partial content fetching 延后到 1.x。
 
@@ -31,14 +31,14 @@ Cloudreve for macOS 采用原生多进程架构：
 | 开发语言 | Swift 6 + Rust stable | Swift 负责 Apple Framework，Rust 负责协议和传输核心 |
 | UI | SwiftUI，`NSStatusItem + NSPopover` 承载菜单栏界面 | AppKit 只用于 SwiftUI 尚不稳定或无法覆盖的系统行为 |
 | Finder 集成 | `NSFileProviderReplicatedExtension` | 不使用普通目录 watcher 模拟云文件 |
-| 后台进程 | `SMAppService` Login Item Agent | Agent 可退出，Extension 仍必须完成系统请求 |
+| 后台运行 | 菜单栏主应用 + `SMAppService.mainApp` | 主应用可退出；Extension 仍必须完成系统请求，并将实时性标为降级 |
 | OAuth | `ASWebAuthenticationSession` + PKCE | Swift 校验 callback/state，Rust 完成协议交换 |
 | FFI | UniFFI + 静态 XCFramework | 仅暴露稳定 DTO、异步命令、进度与结构化错误 |
 | 网络 | Rust `reqwest` + macOS native TLS | 禁止关闭 TLS 校验；显式适配系统代理 |
 | 并发 | Swift Concurrency + 受限 Tokio runtime | 不在 FFI 上传递 runtime 或裸线程句柄 |
 | 持久化 | `rusqlite` + SQLite WAL | 一个 registry DB，每个 Domain 一个 state DB |
 | 凭据 | Security.framework Keychain | token 和上传临时秘密不进入 SQLite、配置和日志 |
-| 跨进程通知 | Darwin Notification | 只传“状态已变化”，接收方重新查询 SQLite |
+| 跨进程通知 | Darwin Notification | 只传固定事件名；Domain UUID 作为数据库查询条件而非通知 payload |
 | 日志 | `OSLog` + Rust `tracing` + 可选轮转文件 | 统一 correlation ID 和脱敏规则 |
 | 构建 | Xcode 原生多 Target + Cargo `xtask` | 生成 universal XCFramework 并由 Xcode Targets 链接 |
 | 服务端基线 | Cloudreve v4.12+ | 仍须通过协议兼容门禁，版本号本身不等于能力证明 |
@@ -78,9 +78,12 @@ Cloudreve for macOS 采用原生多进程架构：
 4. **SSE 只触发同步，不证明同步完成。** “已是最新”必须建立在有效 anchor、无待处理写入和最近校准结果之上。
 5. **不盲目重试结果未知的远端写入。** 必须先查询后置条件或进入 reconciliation。
 6. **全量校准失败时不生成批量删除。** 只有完整分页成功并完成删除候选确认后才能写 tombstone。
-7. **Extension 不依赖 App 或 Agent 存活。** 它可直接访问 Keychain、SQLite 和 CloudreveCore。
+7. **Extension 不依赖 App 存活。** 它可直接访问 Keychain、SQLite 和 CloudreveCore。
 8. **秘密只持久化到 Keychain。** SQLite 只保存 Keychain 引用和非敏感恢复信息。
 9. **移除 Domain 不调用远端删除 API。** 本地清理和远端文件删除是两条完全不同的调用链。
+10. **系统提供的内容 URL 只在当前 callback 生命周期内有效。** Extension 被终止后必须等待 callback 重放和新的 URL，不能凭持久化路径自行打开旧临时文件。
+11. **移除或排除不得丢弃 dirty user data。** 未确认上传的内容必须先完成、显式保留到系统返回位置，或阻断操作。
+12. **同一账号的远端范围不得重叠。** 规范化后的相同、祖先或子孙 remote root 不能由两个可写 Domain 同时管理。
 
 ## 3. 系统上下文与运行时拓扑
 
@@ -88,10 +91,9 @@ Cloudreve for macOS 采用原生多进程架构：
 flowchart TB
     USER[用户]
     FINDER[Finder / macOS File Provider]
-    APP[CloudreveMac.app<br/>菜单栏与设置]
+    APP[CloudreveMac.app<br/>菜单栏 设置 SSE 校准 通知]
     FP[CloudreveFileProvider.appex<br/>枚举 下载 写入 删除]
     FPUI[CloudreveFileProviderUI.appex<br/>Finder 操作与交互]
-    AGENT[CloudreveEventAgent.app<br/>SSE 校准 通知]
     CORE[CloudreveCore.xcframework<br/>API 上传 加密 Store]
     REG[(registry.sqlite3)]
     DOMAIN[(Domain state.sqlite3)]
@@ -106,47 +108,42 @@ flowchart TB
     FPUI -->|deep link| APP
     APP --> CORE
     FP --> CORE
-    AGENT --> CORE
     CORE <--> REG
     CORE <--> DOMAIN
     APP <--> KC
     FP <--> KC
-    AGENT <--> KC
     CORE <--> SERVER
     CORE <--> STORAGE
-    AGENT -->|signalEnumerator| FINDER
-    APP -. Darwin signal .-> AGENT
+    APP -->|signalEnumerator| FINDER
     FP -. Darwin signal .-> APP
-    AGENT -. Darwin signal .-> APP
 ```
 
-图中的 CloudreveCore 是逻辑组件。App、Agent 和 File Provider Extension 各自在自己的进程中加载同一静态 XCFramework，并通过 Core repository 访问 SQLite；三个进程不共享 Rust 内存或 runtime。File Provider UI Extension 保持轻量，只负责验证 action context 并唤起主应用，不加载 Rust Core。
+图中的 CloudreveCore 是逻辑组件。App 和 File Provider Extension 各自在自己的进程中加载同一静态 XCFramework，并通过 Core repository 访问 SQLite；两个进程不共享 Rust 内存或 runtime。File Provider UI Extension 保持轻量，只负责验证 action context、呈现必要反馈并唤起主应用，不加载 Rust Core。
 
 ### 3.1 进程职责
 
 | 进程 | 核心职责 | 明确不负责 |
 |---|---|---|
-| 主应用 | 登录、Domain 管理、菜单栏、设置、冲突中心、诊断、通知授权 | 不作为 File Provider 请求代理，不长期持有同步任务 |
-| File Provider Extension | item 枚举、change 枚举、内容下载、创建、修改、移动、重命名、删除 | 不维护永久 SSE，不依赖主应用窗口或 Agent IPC |
-| File Provider UI Extension | Finder 自定义操作、错误恢复入口、唤起主应用 | 不持有 token，不直接执行上传、删除或冲突覆盖 |
-| Login Item Agent | 每 Domain SSE、周期 reconciliation、后台状态聚合、用户通知 | 不直接修改 Finder 文件，不成为上传完成的唯一执行者 |
+| 主应用 | 登录、Domain 管理、菜单栏、设置、冲突中心、诊断、SSE、周期校准、通知 | 不作为 File Provider 请求代理，不成为 Finder 写入完成的唯一执行者 |
+| File Provider Extension | item 枚举、change 枚举、内容下载、创建、修改、移动、重命名、删除、无交互 Finder action | 不维护永久 SSE，不依赖主应用窗口或强 IPC |
+| File Provider UI Extension | Finder 交互式 action、认证错误恢复入口、唤起主应用 | 不持有 token，不直接执行上传、删除或冲突覆盖；无交互 action 留在 File Provider Extension |
 | Rust Core | Cloudreve 协议、上传 Provider、加密、DTO 映射、SQLite repository | 不调用 SwiftUI，不持有 NSFileProvider 对象，不读取任意用户路径 |
 
 ### 3.2 故障独立性
 
-- 主应用退出：Agent 和 File Provider 继续运行；用户再次打开时从 SQLite 恢复视图。
-- Agent 退出：File Provider 仍可按系统请求枚举、下载和写入；远端实时性降级，后续枚举或 Agent 恢复时校准。
+- 主应用退出：File Provider 仍可按系统请求枚举、下载和写入；SSE、周期校准与通知暂停，Domain 不得显示全局 healthy。
+- 主应用恢复：先重订阅 SSE 并 reconciliation，再恢复实时状态；UI 从 SQLite projection 恢复，不依赖旧进程内存。
 - Extension 被终止：未完成 operation 和 upload session 保留；系统下次回调时按幂等规则恢复。
 - SQLite 暂时繁忙：调用方执行有上限的短退避，不在内存中假定写入成功。
 - Keychain 锁定：读请求可使用已 materialized 内容；需要凭据的请求返回认证暂不可用，不删除队列。
-- SSE 丢失：Domain 进入 `event_degraded` 或 `reconciling`，不能显示“已是最新”。
+- SSE 丢失或主应用未运行：Domain 进入 `event_degraded` 或 `reconciling`，不能显示“已是最新”。
 
 ### 3.3 跨进程通信
 
 1. SQLite 保存所有需要恢复的状态，是跨进程唯一事实源。
-2. Darwin Notification 只使用固定事件名和 Domain UUID，不携带 token、路径、文件名或业务 payload。
+2. Darwin Notification 使用固定事件名且不携带 payload；接收方查询 registry 中的全局 revision 和受影响 Domain 集合，不把 Domain UUID、token、路径或文件名编码进通知名。
 3. 接收通知后重新查询 SQLite，因此通知丢失不会破坏正确性。
-4. Agent 写入远端变化后调用 `NSFileProviderManager.signalEnumerator(for:)`，通知系统拉取 container 或 working set 的变化。
+4. 主应用写入远端变化后调用 `NSFileProviderManager.signalEnumerator(for:)`，通知系统拉取 container 或 working set 的变化。
 5. 1.0 不引入 App 与 Extension 的 NSXPC 强依赖。未来仅在 SQLite 写竞争经过压测确认不可接受时，才增加可回退的写入 broker。
 
 ## 4. 工程与 Target 结构
@@ -172,16 +169,12 @@ cloudreve-macos/
 │   └── CloudreveFileProviderUI/
 │       ├── ActionViewController.swift
 │       └── ActionRouter.swift
-├── Helpers/
-│   └── CloudreveEventAgent/
-│       ├── AgentLifecycle.swift
-│       ├── EventSupervisor.swift
-│       └── ReconciliationScheduler.swift
 ├── Packages/
 │   ├── CloudreveDomainKit/
 │   ├── CloudreveAuthKit/
 │   ├── CloudreveStoreBridge/
 │   ├── CloudreveObservability/
+│   ├── CloudreveEventCoordinator/
 │   └── CloudreveDesignSystem/
 ├── Rust/
 │   ├── Cargo.toml
@@ -212,14 +205,13 @@ cloudreve-macos/
 | Target | 类型 | 依赖 |
 |---|---|---|
 | `CloudreveMac` | macOS App | Swift Packages、CloudreveCore |
-| `CloudreveFileProvider` | File Provider Extension | DomainKit、AuthKit、StoreBridge、CloudreveCore |
+| `CloudreveFileProvider` | File Provider Extension | DomainKit、AuthKit、StoreBridge、CloudreveCore；Replicated File Provider 与非 UI actions |
 | `CloudreveFileProviderUI` | File Provider UI Extension | DomainKit、轻量 ActionRouter |
-| `CloudreveEventAgent` | Login Item App | DomainKit、AuthKit、StoreBridge、CloudreveCore |
 | `CloudreveMacTests` | Unit Test Bundle | Swift 业务模块 |
 | `CloudreveFileProviderTests` | Unit/Integration Test Bundle | File Provider adapter 与测试服务器 |
 | `BuildCloudreveCore` | Aggregate/Script Target | Cargo `xtask build-xcframework` |
 
-App、File Provider 和 Agent 使用相同 App Group 与最小 Keychain Access Group。File Provider UI 不读取数据库或凭据，只通过 extension context 和 deep link 把 action 交给主应用。Debug 可启用 File Provider testing entitlement，Release 配置不得包含测试 entitlement。
+App 和 File Provider 使用相同 App Group 与最小 Keychain Access Group。File Provider UI 不读取数据库或凭据，只通过 extension context 和 deep link 把 action 交给主应用。主应用以 `SMAppService.mainApp` 管理登录启动，不嵌入第二个常驻 helper。Debug 可启用 File Provider testing entitlement，Release 配置不得包含测试 entitlement。
 
 ### 4.2 Rust Crates
 
@@ -243,6 +235,7 @@ App、File Provider 和 Agent 使用相同 App Group 与最小 Keychain Access G
 - `DomainSignalBus`：发送和接收 Darwin Notification；
 - `NameMapper`：远端名称、Finder 展示名称和碰撞键映射；
 - `CapabilityMapper`：Cloudreve permission/capability 到 `NSFileProviderItemCapabilities`。
+- `RemoteScopeGuard`：规范化 origin/account/remote root，拒绝同账号重复或祖先/子孙范围。
 
 ### 5.2 `CloudreveAuthKit`
 
@@ -267,6 +260,7 @@ Keychain 使用 `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`。每个 Doma
 - `Enumerator`：目录分页和 change journal 分页；
 - `ContentCoordinator`：下载、临时文件、校验和取消；
 - `MutationCoordinator`：create/modify/delete operation saga；
+- `ReplayMatcher`：使用系统临时 item ID、稳定 item ID、base version、changed fields 和 source fingerprint 关联 callback 重放；
 - `ThumbnailProvider`：P1 缩略图，失败时不影响主流程；
 - `ErrorMapper`：CoreError 到 File Provider/POSIX error。
 
@@ -277,6 +271,8 @@ Keychain 使用 `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`。每个 Doma
 - 设置窗口使用 SwiftUI `Settings` 和 `NavigationSplitView`；
 - 添加网盘使用单独 `WindowGroup` 和显式状态机；
 - 冲突中心通过 `cloudreve-macos://conflict/<id>` deep link 定位；
+- 主应用内 `EventCoordinator` 管理 SSE、周期 reconciliation、`signalEnumerator` 与通知；退出应用后这些增强能力暂停；
+- 登录启动使用 `SMAppService.mainApp`，开关读取系统真实注册状态；
 - UI 只读取 projection/view model，不直接修改同步表。
 
 ## 6. Rust Core 与 FFI 契约
@@ -291,6 +287,8 @@ Keychain 使用 `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`。每个 Doma
 6. Rust panic 不跨 FFI，统一转成 `CoreError.internal` 并记录 correlation ID。
 7. 上传会话秘密通过 UniFFI `SecretVault` callback 交给 Swift Keychain 封装，Rust Store 只保存 opaque reference。
 8. Swift 保留原始文件描述符所有权；Rust 开始异步 IO 前先 `dup`，并只关闭自己的副本。
+9. `sourceFD` 只属于当前 File Provider callback；operation 持久化 `source_generation/fingerprint` 而不持久化 FD 或临时路径，重放时必须绑定新 FD。
+10. UniFFI 回调不得同步回入持有 Swift actor/SQLite 写锁的调用栈，进度通过有界异步通道汇聚，避免跨语言死锁和无界积压。
 
 ### 6.2 核心接口
 
@@ -306,11 +304,10 @@ DomainSession.listChildren(parentItemID, pageToken, pageSize)
 DomainSession.getItem(itemID)
 DomainSession.updateAccessCredential(accessToken, expiresAt, generation)
 DomainSession.fetchContents(itemID, expectedVersion, destinationFD)
-DomainSession.createFolder(operation, parentID, name)
-DomainSession.uploadFile(operation, parentID, name, sourceFD, fingerprint)
-DomainSession.modifyContents(operation, itemID, expectedVersion, sourceFD, fingerprint)
-DomainSession.moveOrRename(operation, itemID, destinationParentID, name)
-DomainSession.deleteItem(operation, itemID, expectedVersion)
+DomainSession.createFolder(operation, replayKey, parentID, name)
+DomainSession.uploadFile(operation, replayKey, parentID, name, sourceFD, fingerprint)
+DomainSession.modifyItem(operation, replayKey, itemID, expectedVersion, changedFields, sourceFD?, fingerprint?)
+DomainSession.deleteItem(operation, replayKey, itemID, expectedVersion, recursive)
 DomainSession.enumerateChanges(anchor, limit)
 DomainSession.reconcile(scope, reason)
 DomainSession.subscribeEvents(clientID, callback)
@@ -351,7 +348,7 @@ Swift 只根据 `stableCode` 选择本地化文案，不把服务端原始 messa
 - Cloudreve API 默认连接超时 10 秒、普通请求超时 60 秒；下载和上传使用独立 inactivity timeout，不设不合理的整文件固定时限；
 - API Bearer token 只发送到配置实例的标准化 origin；跨 origin 重定向不得携带 Authorization；
 - 存储 Provider 的签名 URL 不附加 Cloudreve Bearer token；
-- 默认只允许 `https`；用户明确配置局域网 `http` 时显示风险提示，并只对该 origin 生效；
+- Release 只允许 `https`，不以风险提示代替传输保护；仅 Debug/自动化测试可对 loopback host 开启 `http`；私有部署通过系统信任或安装私有 CA 解决证书问题；
 - 禁止 `file`、自定义脚本协议和无上限重定向；
 - 系统代理通过独立 macOS proxy resolver 注入 reqwest；代理和私有 CA 是发布前 contract test 项；
 - 读取响应采用流式 backpressure，文件内容不整体载入内存。
@@ -362,7 +359,7 @@ Cloudreve 加密上传保持服务端协议定义的 AES-256-CTR 兼容性。分
 
 ### 7.1 Domain identity
 
-首次添加网盘时生成永久 UUID：
+首次添加网盘时生成永久 UUID。写入 registry 前先计算 `scope_key = SHA-256(canonical_origin, account_id, canonical_remote_root)` 并检查同账号远端范围是否相同或互为祖先；命中时拒绝第二个可写 Domain：
 
 ```text
 NSFileProviderDomainIdentifier = "crd:<domain_uuid>"
@@ -386,25 +383,28 @@ NSFileProviderItemIdentifier = "cri:<item_uuid>"
 
 路径只作为 API 路由 metadata。无法确定旧、新远端对象对应关系时，不复用 item UUID，也不执行破坏性操作。
 
+本地创建时，File Provider 提供的临时 item identifier 在崩溃重放中保持稳定。`pending_creations` 必须先持久化该 identifier 到客户端 item UUID/operation ID 的映射；远端创建成功后再绑定 `remote_entity_id`。不得为每次 callback 随机创建一个新 operation。
+
 ### 7.3 版本
 
 | 版本 | 计算方式 | 用途 |
 |---|---|---|
-| `contentVersion` | `SHA-256(remote_entity_id, primary_entity/ETag, size, content timestamp)` | 下载缓存与并发内容修改检测 |
+| `contentVersion` | `SHA-256(primary_entity/ETag)`；无可靠内容版本时使用经门禁验证的 content revision，不混入一般 `updated_at` | 下载缓存与并发内容修改检测 |
 | `metadataVersion` | `SHA-256(parent UUID, display name, type, permission, shared, flags, metadata revision)` | rename、move、权限和 Finder 属性刷新 |
 | `expectedRemoteVersion` | mutation 开始时保存的 ETag/primary entity | 条件写入与冲突判断 |
 
-哈希输入使用带长度前缀的规范二进制编码，不使用字符串直接拼接。
+哈希输入使用带长度前缀的规范二进制编码，不使用字符串直接拼接。本地尚未提交的内容使用持久化的 `source_generation` 生成临时 content version；远端提交后才切换为服务端 content version，避免旧上传完成覆盖后继本地编辑。
 
 ### 7.4 名称映射
 
 - `remote_name` 保存服务端原名；`display_name` 保存 Finder 中可用名称；
-- `collision_key` 使用 Unicode 规范化、目标文件系统大小写规则和保留字符规则计算；
-- 同目录碰撞时，第一个对象保留原展示名，其余对象使用稳定后缀 `（Cloudreve <remote-id-short>）`；
+- `remote_collision_key` 对远端原名做 Unicode/大小写归一化，用于检测同目录碰撞；`display_collision_key` 对最终 Finder 展示名计算并承担唯一约束；
+- 同目录碰撞时，使用已持久化的 winner 或稳定 item UUID 排序决定原名归属，其余对象使用稳定后缀 `（Cloudreve <remote-id-short>）`；不能让服务端分页顺序改变展示名；
 - 映射只影响本地展示，不自动重命名远端对象；
 - 碰撞 item 添加装饰并进入“需要处理”；
 - 本地创建会先检查 collision key，冲突时返回 filename collision；
-- 远端符号链接或 `sys:shared_redirect` 在 1.0 不跟随目标，不进入普通可写树，并计入诊断中的 unsupported item 数。
+- 远端符号链接或 `sys:shared_redirect` 在 1.0 不跟随目标，不进入普通可写树，并计入诊断中的 unsupported item 数；macOS package 按目录逐子项同步而不承诺包级原子性，Finder alias 按普通文件处理，跨 item hard link 与 sparse allocation 不承诺保留；
+- 1.0 传输 data fork。Finder tag/comment、任意 xattr、resource fork 和 POSIX ACL 仅在本机由系统保留时存在，不写入 Cloudreve，也不参与 identity/version；UI 与兼容矩阵不得暗示这些 metadata 会跨设备同步。
 
 ## 8. 持久化架构
 
@@ -414,21 +414,24 @@ NSFileProviderItemIdentifier = "cri:<item_uuid>"
 <AppGroup>/
 ├── Registry/registry.sqlite3
 ├── Domains/<domain_uuid>/state.sqlite3
-├── Temporary/<domain_uuid>/
 ├── Logs/
 └── Diagnostics/
+
+<NSFileProviderManager.temporaryDirectoryURL>/
+├── Transfers/<operation_uuid>/
+└── ConflictArtifacts/<conflict_uuid>/
 ```
 
-File Provider materialized 内容由系统管理，不复制到 App Group。`Temporary` 仅用于系统回调允许范围内的下载临时文件和短期诊断产物，完成或失败后清理。
+File Provider materialized 内容由系统管理，不复制到 App Group。与系统交换的下载文件和 callback 内容克隆必须使用该 Domain 的 `NSFileProviderManager.temporaryDirectoryURL`，以保证同卷 clone/move 语义；App Group 只保存状态、日志和短期诊断产物。`Transfers` 在完成、失败和启动恢复时按 operation 清理；`ConflictArtifacts` 仅在系统不能保证 pending 内容重放时使用，并在冲突解决或 Domain 安全移除后清理。
 
 ### 8.2 Registry 数据库
 
 | 表 | 关键字段 | 用途 |
 |---|---|---|
-| `domains` | `domain_id`、origin、display_name、remote_root、account_id、status、secret_ref、capability_snapshot | 非敏感 Domain 配置 |
+| `domains` | `domain_id`、origin、display_name、remote_root、account_id、scope_key、status、secret_ref、capability_snapshot | 非敏感 Domain 配置与重复范围防护 |
 | `preferences` | key、typed value、updated_at | 全局设置 |
-| `process_heartbeats` | role、instance_id、bundle_version、last_seen | 判断 Agent/迁移状态 |
-| `schema_meta` | version、compat_min、compat_max | 滚动升级兼容性 |
+| `process_heartbeats` | role、instance_id、bundle_version、schema_generation、last_seen | 判断 App/Extension 与迁移状态 |
+| `schema_meta` | version、generation、compat_min、compat_max、migration_state | 滚动升级兼容性与写入 fencing |
 
 `origin` 保存规范化 scheme、host、port 和 base path。显示值与网络请求值分离，避免字符串拼接 URL。
 
@@ -436,25 +439,29 @@ File Provider materialized 内容由系统管理，不复制到 App Group。`Tem
 
 | 表 | 关键字段 | 用途 |
 |---|---|---|
-| `items` | item_uuid、remote_entity_id、parent_uuid、remote_name、display_name、kind、ETag、版本、size、timestamps、permissions、flags、tombstone、seen_generation | Finder metadata 镜像 |
-| `directory_snapshots` | parent_uuid、snapshot_generation、complete、next_page_token、updated_at | 防止把不完整分页当作完整目录 |
-| `change_journal` | sequence、epoch、item_uuid、change_kind、version、origin、created_at | File Provider change enumeration |
+| `items` | item_uuid、remote_entity_id、parent_uuid、trash_original_parent_uuid、remote_name、display_name、remote/display collision key、kind、ETag、版本、size、timestamps、permissions、flags、trashed、tombstone、seen_generation | Finder metadata 镜像 |
+| `directory_snapshots` | parent_uuid、snapshot_generation、order_key、complete、server_cursor、updated_at | 防止把不完整或跨版本分页当作完整目录 |
+| `materialized_containers` | item_uuid、system_anchor、is_materialized、updated_at | 跟踪系统已落盘目录并限定 working set 通知范围 |
+| `change_journal` | sequence、epoch、item_uuid、old_parent_uuid、new_parent_uuid、change_kind、version、origin、created_at | container/working set change enumeration |
 | `sync_state` | epoch、min_valid_sequence、last_event_at、event_client_id、last_reconcile_at、reconcile_status | anchor 与恢复状态 |
-| `operations` | operation_id、kind、item_uuid、expected_version、state、step、attempt、next_retry_at、outcome、error_code | 持久化本地 mutation saga |
-| `upload_sessions` | operation_id、secret_ref、fingerprint、provider、chunk_size、expires_at、state | 跨进程上传恢复索引 |
+| `pending_creations` | system_template_id、item_uuid、operation_id、created_at | 将系统 crash replay 映射回同一创建 operation |
+| `operations` | operation_id、replay_key、kind、item_uuid、expected_version、changed_fields、source_generation、state、step、lease_owner/expires_at、attempt、next_retry_at、outcome、error_code | 持久化本地 mutation saga |
+| `upload_sessions` | operation_id、remote_session_ref、secret_ref、fingerprint、provider、chunk_size、expires_at、state | 跨 callback 上传恢复索引 |
 | `upload_parts` | operation_id、part_index、offset、length、source_hash、etag、state、attempt | 已完成分片及源内容校验 |
 | `tasks` | task_id、operation_id、direction、state、bytes、speed、error、timestamps | 菜单栏与诊断视图 |
 | `conflicts` | conflict_id、item_uuid、kind、base/remote/local metadata、state、resolution | 持久冲突中心 |
-| `reconcile_runs` | run_id、scope、generation、phase、cursor、started_at、completed_at、summary | 校准恢复 |
+| `reconcile_runs` | run_id、scope、generation、phase、cursor、lease_owner/expires_at、started_at、completed_at、summary | 校准恢复 |
 | `auth_lease` | singleton、owner_instance_id、expires_at、credential_generation | 跨进程 token refresh 互斥 |
 
 主要约束和索引：
 
 - `items(item_uuid)` 为主键；
 - 活跃对象的 `remote_entity_id` 在 Domain 内唯一；
-- `items(parent_uuid, collision_key)` 对活跃对象唯一；
+- `items(parent_uuid, display_collision_key)` 对活跃对象唯一；`remote_collision_key` 建普通索引用于碰撞分组，不设唯一约束；
+- `pending_creations(system_template_id)` 和 `operations(replay_key)` 唯一；
 - `change_journal(sequence)` 单调递增；
 - 同一 item 同时最多一个 active mutation；
+- operation 和 reconcile worker 通过事务 compare-and-swap 获取有期限 lease；崩溃后可接管，但同一 generation 只有一个 owner 提交最终结果；
 - `upload_parts(operation_id, part_index)` 唯一；
 - 所有外键启用并通过延迟约束支持批量 reconcile。
 
@@ -474,26 +481,38 @@ PRAGMA busy_timeout = 3000;
 - busy 采用 50、100、200、400 ms 有上限退避，超过调用 deadline 后返回可重试错误；
 - progress 最多每秒或每增加 1 MiB 持久化一次，避免写放大；
 - operation 最终状态、item 最终版本和 change journal 在同一事务提交；
-- checkpoint 由 Agent 在空闲时执行，Extension 不进行长时间 checkpoint。
+- 网络请求前领取 lease，网络返回后重新校验 lease owner、operation generation 和 source generation；失去所有权的 worker 不提交旧结果；
+- checkpoint 由主应用在空闲时执行；主应用未运行时只允许短小被动 checkpoint，Extension 不进行长时间 checkpoint。
 
 ### 8.5 秘密存储
 
 Keychain item 分为：
 
 1. `credential/<domain_uuid>`：access token、refresh token、过期时间；
-2. `upload/<domain_uuid>/<operation_uuid>`：session ID、签名 URL、Provider credential、callback secret、加密 key/IV；
+2. `upload/<domain_uuid>/<operation_uuid>`：小型 Provider credential、callback secret、加密 key/IV 等必须跨 callback 保留的秘密；
 3. `diagnostic-install-id`：仅本地关联，不用于遥测。
 
 SQLite 的 `secret_ref` 是随机引用，不包含 secret。上传成功、明确取消或会话过期后删除对应 Keychain item。
+
+Keychain 不保存无上限的分片 signed URL 数组。Provider 必须允许根据非敏感 session ID 重新获取/刷新 URL，或只持久化有上限的小型恢复凭据；否则该 Provider 不进入“跨进程续传”支持矩阵。访问令牌和 signed URL 只按各自 origin 使用，禁止在重定向时转发。
 
 ### 8.6 Schema 升级
 
 - schema 声明 `compat_min` 和 `compat_max`，支持新旧相邻一个应用版本短暂并存；
 - migration 先新增表/列和回填，再在后续版本删除旧结构；
 - 破坏性迁移使用 shadow table，不在 Extension 请求中执行长事务；
-- 启动迁移前主应用请求 Agent 退出，迁移完成后重新注册；
-- 旧进程发现 schema 超出兼容范围时拒绝写入并退出，不猜测字段含义；
+- 主应用将 `migration_state` 置为 preparing，等待已登记写事务结束并递增 schema generation；无法强制终止的旧 Extension 在下一次写入前因 generation/compatibility fencing 拒绝写入；
+- 旧进程发现 schema generation 改变或超出兼容范围时关闭连接、返回可重试升级中错误并退出当前请求，不猜测字段含义；
+- 只有新版本完成 migration、integrity check 和 generation 发布后才恢复 mutation；主应用不能仅凭进程 heartbeat 假定旧 Extension 已退出；
 - migration 失败保留原库和诊断信息，Domain 进入 `error`，不得以空库覆盖。
+
+### 8.7 损坏检测与恢复
+
+- 启动和异常退出后执行有上限的 `quick_check`；检测到损坏时立即把 Domain 置为 `repair_required`，关闭写入并隔离原 DB/WAL，不直接创建同名空库；
+- 主应用在干净 checkpoint 后使用 SQLite online backup 保留最近两个本地状态快照；备份不包含 Keychain secret，轮转遵循诊断存储上限；
+- `items`/目录快照属于可重建缓存，但 `operations`、`pending_creations`、`upload_sessions` 和 `conflicts` 属于关键恢复记录。恢复时优先从最新完整备份读取，再通过 File Provider pending/materialized enumerator、callback/reimport 重放和远端后置条件校准；
+- 在所有 unknown outcome 得到确认前，不删除 upload Keychain item、不发布 tombstone、不把任务标记成功；无法证明状态时保留需处理事项并导出诊断；
+- 只有确认不存在 dirty/pending 数据，或系统已经把 dirty user data 保留到 Domain 外后，才允许丢弃损坏库并从远端全量重建 metadata。
 
 ## 9. File Provider 协议
 
@@ -508,24 +527,28 @@ sequenceDiagram
     participant S as Cloudreve API
 
     F->>E: enumerateItems(container, page)
-    E->>D: 读取 container 与完整缓存状态
-    alt 在线或缓存不完整
-        E->>C: listChildren(remote parent, cursor)
-        C->>S: GET file list
+    E->>D: 校验本地 snapshot generation/page token
+    alt 需要建立或继续远端快照
+        E->>C: listChildren(remote parent, stable cursor)
+        C->>S: GET file list（固定排序）
         S-->>C: items + next token
-        C->>D: 事务 upsert page + snapshot cursor
+        C->>D: 事务 upsert page + snapshot cursor/order
     end
-    E->>D: 查询当前页 ItemSnapshot
-    E-->>F: items + nextPage
+    E->>D: 按 snapshot generation/order 查询系统建议页大小
+    E-->>F: items + bounded nextPage
 ```
 
 规则：
 
-- page size 初始为 `min(server max_page_size, 500)`；
-- page token 是带版本、Domain、parent 和远端 cursor 的不透明编码，并校验调用上下文；
+- 优先采用 `observer.suggestedPageSize`，并限制为 `min(system suggestion, server max_page_size, 500)`；不以固定 500 覆盖系统建议；
+- `NSFileProviderPage` 不超过 500 bytes。page token 仅编码版本、Domain、parent、snapshot generation 和本地 offset/短游标；大型或敏感远端 cursor 保存在 SQLite；
+- 枚举排序必须显式固定并跨页稳定。阶段 0 需验证服务端 cursor 在并发 create/rename/delete 下无重无漏；
+- 若服务端没有稳定 snapshot/cursor 语义，则 Core 先完成一个本地 `directory_snapshot` generation，再从该 generation 向系统分页；不能把变化中的 page-number 列表直接暴露为一次 File Provider 枚举；
+- 构造本地 snapshot 不得阻塞单次 File Provider page callback 数分钟：有旧完整 snapshot 时先返回旧 snapshot 并异步刷新；首次无快照时执行有 deadline 的分段构建，超时返回可重试错误；无法在有界稳定化轮次内收敛则该服务端版本不通过门禁；
 - 只有最后一页成功写入后，`directory_snapshots.complete` 才为 true；
 - 离线时仅可返回已完成的缓存快照；不完整缓存不得伪装成完整目录；
 - 每页对象先完成身份映射、名称碰撞检查和数据库事务，再交给 observer；
+- 同一 snapshot 内展示名 winner 和 sort key 固定；中途远端变化写入 journal，在当前枚举完成后的 change enumeration 交付；
 - 枚举只处理当前 container，不递归加载整个 Domain；
 - 根容器使用 `.rootContainer`，working set 使用 `.workingSet`。
 
@@ -534,21 +557,29 @@ sequenceDiagram
 anchor 使用版本化二进制结构：
 
 ```text
-AnchorV1 { domain_uuid, epoch_uuid, sequence }
+AnchorV1 { domain_uuid, scope_kind, container_uuid?, epoch_uuid, sequence }
 ```
 
 处理流程：
 
 1. 解码并校验 Domain；
-2. 若 epoch 不一致，或 sequence 小于 `min_valid_sequence`，返回 `syncAnchorExpired`；
-3. 按 sequence 返回最多 500 条 update/delete；
+2. 若 Domain/scope 不匹配、epoch 不一致，或 sequence 小于 `min_valid_sequence`，返回 `syncAnchorExpired`；
+3. 从 anchor sequence 后按全局顺序扫描有上限的一段 journal，再按 enumerator scope 过滤 update/delete；目录 enumerator 同时检查 old/new parent，working set 只返回其成员相关变化；
 4. 同一批内可按 item 合并为最终净变化，但不能跨越 delete 后 recreate 的 identity 边界；
-5. 返回本批最后 sequence；仍有记录时设置 `moreComing`；
+5. 返回“最后已扫描”的 sequence，即使该段均被 scope 过滤也要推进 anchor；该 Domain journal 仍有未扫描记录时设置 `moreComing`，避免被无关目录变化卡住；
 6. observer 完成前不裁剪本批 journal。
 
-journal 至少保留最近 7 天和最近 100,000 条记录，取覆盖范围更大的条件。达到 1,000,000 条或 256 MiB 后执行压缩，并更新 `min_valid_sequence`；旧 anchor 随后明确过期。
+journal 软保留目标为最近 7 天和最近 100,000 条记录中覆盖范围更大者。达到 1,000,000 条或 256 MiB 的硬上限时允许压缩并更新 `min_valid_sequence`，即使未满 7 天；旧 anchor 随后必须明确过期并触发重新枚举，不能返回空变化。
 
-若 Agent heartbeat 已过期或 SSE 处于 degraded，Extension 先返回当前已持久化 journal，并异步登记 reconciliation。校准完成后再次 `signalEnumerator`。`enumerateChanges` 不等待一次可能持续数分钟的全量扫描，也不因暂时没有 journal 记录而把 Domain 标记为 healthy。
+若主应用 heartbeat 已过期或 SSE 处于 degraded，Extension 先返回当前已持久化 journal，并异步登记目标 scope reconciliation。校准完成后再次 `signalEnumerator`。`enumerateChanges` 不等待一次可能持续数分钟的全量扫描，也不因暂时没有 journal 记录而把 Domain 标记为 healthy。
+
+#### Working set 与 materialized containers
+
+- 实现 `materializedItemsDidChange`，通过 `NSFileProviderManager.enumeratorForMaterializedItems` 增量维护 `materialized_containers`，回调本身只置标记并快速完成；
+- working set 至少包含已 materialized 目录的直接子项、最近访问 item、active operation/conflict 和系统已知的 pending item；不默认把 100,000 item 全量常驻 working set；
+- 远端 create/modify/delete 只有在 old/new parent 属于 materialized set 或 item 已在 working set 时才进入 working-set change；目录自身的 change journal 仍完整保留；
+- 远端 move 同时记录 old/new parent，任一侧 materialized 时通知 working set；未知 parent 不伪造删除，系统会结合 item identity 处理；
+- materialized set 丢失或损坏时可保守退化为扩大 working set，但要记录 degraded 状态并后台重建，不能漏发已落盘目录的远端变化。
 
 ### 9.3 按需下载
 
@@ -573,7 +604,7 @@ sequenceDiagram
 ```
 
 - 1.0 总是完整下载，P2 再实现 partial fetch；
-- 临时文件必须位于 Extension 可访问位置，使用随机文件名和排他创建；
+- 临时文件必须位于该 Domain 的 `NSFileProviderManager.temporaryDirectoryURL`，使用随机文件名和排他创建；获取目录失败时返回可重试初始化错误，不能回退到跨卷任意临时目录；
 - 下载过程中持续检查系统 cancellation；
 - 远端版本与请求版本不一致时丢弃临时内容并返回 version out of date；
 - 长度、解密结果或服务端校验失败时不得 materialize；
@@ -591,9 +622,9 @@ sequenceDiagram
     participant C as CloudreveCore
     participant S as Cloudreve/Provider
 
-    F->>E: createItem / modifyItem
-    E->>D: 创建 operation(queued) 与稳定 item UUID
-    E->>E: 打开受控 source FD，计算 fingerprint
+    F->>E: createItem / modifyItem（template/baseVersion/changedFields/contentURL）
+    E->>D: 以 replay key 查找或创建 operation 与稳定 item UUID
+    E->>E: 打开当前 callback 的 source FD，计算 fingerprint/source generation
     E->>C: 创建或恢复 upload session
     C->>K: 通过 Swift vault 保存 session secret
     loop 未完成分片
@@ -606,19 +637,30 @@ sequenceDiagram
     E-->>F: 完成回调并返回最终 item
 ```
 
-源文件快速 fingerprint 包含 size、mtime、File Provider 本地版本以及首尾分段哈希。文件系统 inode 可能因系统重新提供临时副本而改变，因此只作为诊断字段，不作为恢复 identity。
+源文件快速 fingerprint 包含 size、File Provider base version 以及首尾分段哈希；mtime 和 inode 可能因系统重新提供临时副本而改变，只作为诊断字段，不参与同一内容的硬判定。完整内容哈希与逐分片 plaintext 哈希在流式上传时计算，并在提交前与 operation 的 source generation 绑定。
+
+callback 与源内容生命周期规则：
+
+- create 的 replay key 首选系统在 item template 中提供、且 crash replay 时稳定的临时 item identifier；远端成功后映射到客户端 item UUID；
+- modify 的 replay key 由 `item_uuid + baseVersion + normalized changedFields + source fingerprint/generation` 构成；delete 由 `item_uuid + baseVersion + recursive` 构成；
+- File Provider 提供的 content URL 由系统所有，completion 后可能被 unlink；只能在 callback 内打开并 `dup` FD，禁止把 URL/FD 持久化后跨进程使用；
+- Extension 被终止时 operation/session 保留为 `awaiting_source_replay`。只有系统重放 callback、提供新 content URL 且 fingerprint 匹配后才继续上传；
+- 若重放内容已变化，旧 session 进入 superseded/abandoned，已上传分片不得与新内容混合；同一 item 的后继修改排在当前 generation 之后；
+- `mayAlreadyExist`、deletion-conflicted 和 reimport 必须先尝试匹配现有 remote/item/operation；无法证明对应关系时返回可恢复冲突，不创建第二个远端对象。
 
 上传恢复规则：
 
 - 已完成分片的 ETag 持久化在 `upload_parts`；
 - 每个完成分片同时保存 plaintext SHA-256；恢复时重新读取并校验已完成分片，防止相同 size/mtime 下混用新旧内容；
-- Extension 被终止、网络断开或系统取消时保留仍有效 session；
+- Extension 被终止、网络断开或系统取消时保留仍有效 session，但没有新的 callback source FD 时不主动续跑；
 - 只上传 pending/failed part，不重传已确认 part；
 - Provider completion 必须可重试或可查询；结果未知时进入 `verifying`，不得创建第二个文件；
 - 只有服务端明确 session 无效、过期，或源 fingerprint 改变时才放弃 session；
 - 最终 FileResponse 入库前，File Provider callback 不返回成功。
 
-### 9.5 移动、重命名和删除
+当一次 `modifyItem` 同时包含 filename、parent 和 contents 时，整个 changed-fields 集合进入同一 saga。远端 API 只能分步时，可通过 `stillPendingFields` 让系统稍后重放尚未提交的字段；不得先返回所有字段成功，再以后台任务补做内容或改名。只有经过 Spike 证明远端对该组合具备原子可见性时，才设置 `NSExtensionFileProviderAppliesChangesAtomically=YES`。
+
+### 9.5 移动、重命名、废纸篓和永久删除
 
 每个 mutation 形成持久 saga：
 
@@ -628,16 +670,21 @@ queued
   -> remote_submitted
   -> verifying
   -> committed
-  -> callback_completed
 ```
+
+`committed` 已包含可重放的最终 item/error 结果。completion handler 本身无法做可靠的“调用后持久化”，因此不设置 `callback_completed` 为正确性条件；系统若因回调丢失而重放，Extension 直接返回已提交结果。
 
 - `preflight` 用 `remote_entity_id` 获取当前对象，验证父级、路径和预期版本；
 - 远端 API 支持条件参数时，必须携带 entity ID/expected version；
-- rename 和 move 合并为一个逻辑 operation；Cloudreve 只能分步执行时，持久化当前 step，并在失败后校准，不把半完成状态标记成功；
-- 删除只针对 preflight 确认的远端对象；根目录、只读对象和 identity 不明确对象拒绝删除；
+- rename、move 与同次内容修改合并为一个逻辑 operation；Cloudreve 只能分步执行时，持久化当前 step，准确返回 `stillPendingFields`，并在失败后校准，不把半完成状态标记成功；
+- `trashRestore` 门禁通过时，Domain 在 macOS 13+ 设置 `supportsSyncingTrash = true`。普通 Finder 删除表现为把 `parentItemIdentifier` 改为 `.trashContainer`，通过 `modifyItem` 映射到 Cloudreve 软删除并保存原父级；恢复是从 `.trashContainer` reparent 到指定或原父级，映射 Cloudreve restore；
+- Extension 必须能枚举 `.trashContainer`；trashed item 留在 working set，trashed 目录的子项从 working set 移除，恢复目录后重新发布子项变化；
+- `deleteItem` 表示从废纸篓永久删除。永久删除只针对 preflight 确认的远端对象；根目录、只读对象和 identity 不明确对象拒绝删除；
+- 未带 recursive option 的非空目录返回 `directoryNotEmpty`；递归删除逐项记录结果，部分失败不得把整棵子树标记成功；
+- 若目标服务端只能直接永久删除或无法可靠恢复，则不声明 trash 支持，并隐藏 `.allowsTrashing/.allowsDeleting`，不能把 Finder 普通删除悄悄降级为不可恢复操作；
 - 请求超时但可能已到达服务端时进入 `unknownOutcome`，随后按远端 ID 查询后置条件；
 - 确认已完成则提交本地状态，确认未完成才重试，无法确认则产生需处理事项；
-- 本地 operation 产生的 SSE 回声通过 operation ID、remote ID 和版本合并，不重复生成 Finder 变化。
+- SSE 本身不携带客户端 operation ID。本地写回声通过 active operation 记录、remote ID、目标父级/名称和最终版本后置条件合并；服务端未来若支持幂等键回传，再作为额外证据，不能假定当前协议已有该字段。
 
 ### 9.6 File Provider 错误映射
 
@@ -651,6 +698,7 @@ queued
 | permissionDenied | `cannotSynchronize` 或 Cocoa permission error | 刷新 capabilities，停止重试 |
 | quotaExceeded | `insufficientQuota` | 展示容量问题 |
 | local disk full | POSIX `ENOSPC` | 保留可重试状态 |
+| excludedByRule | `excludedFromSync` | 本地内容保留并标记“仅此 Mac”，规则变化后可重新触发 |
 | cancelled | Cocoa user cancelled | 不显示永久失败 |
 | unknownOutcome | `cannotSynchronize` | 先 verification/reconciliation，不盲重试 |
 
@@ -658,32 +706,32 @@ queued
 
 ### 9.7 Finder P1 能力与排除规则
 
-- “在 Cloudreve 中查看”根据 item UUID 查询当前 remote ID/URI，再构造受信 Web URL，不把缓存路径直接拼入 URL；
-- “立即检查更新”登记目标 item 或 container reconciliation，不重新提交本地上传；
-- “解决冲突”仅在存在 pending conflict 时可用，动作打开主应用对应详情；
+- “立即检查更新”是 `NSFileProviderCustomAction` 非 UI action：在 File Provider Extension 内登记目标 item/container reconciliation，不重新提交本地上传；
+- “在 Cloudreve 中查看”和“解决冲突”通过 File Provider UI action 提供必要反馈后 deep link 到主应用；前者根据 item identifier 在主应用查询当前 remote ID/URI，再构造受信 Web URL，不把缓存路径直接拼入 URL；
+- “解决冲突”只通过 action predicate 对 pending conflict 可用；UI Extension 不读取数据库或 token，也不直接执行覆盖；
 - thumbnail 使用独立缓存键 `remote_entity_id + contentVersion + sizeClass`，超时或失败直接回退系统图标；
 - decoration 只从持久状态派生，不把进度更新编码进 item identifier；
 - 排除规则使用 Rust gitignore 兼容 parser 编译，规则与 revision 按 Domain 保存；
-- 远端命中规则的 item 不进入枚举，本地创建命中规则时返回明确错误；
-- 规则更新会递增 anchor epoch 并触发完整重新枚举；移除已 materialized item 前必须由主应用确认；
+- 远端命中规则的 item 不进入枚举；本地创建命中规则时返回 `excludedFromSync`，让系统保留本地内容并由主应用标记“仅此 Mac”；
+- 规则更新会递增 anchor epoch 并触发完整重新枚举；移除已 materialized item 前必须由主应用确认，存在 dirty/pending 内容时必须先同步或保留到 Domain 外，禁止直接隐藏；
 - 排除操作只改变本地视图，任何路径都不得调用远端 delete。
 
 ### 9.8 Domain 安全移除
 
-1. 在 registry 中把 Domain 标记为 `removing`，拒绝新 mutation；
-2. 通知 Agent 停止该 Domain 的 SSE 和 reconciliation；
-3. 调用 `NSFileProviderManager.remove` 并等待系统完成；
-4. 删除 credential 和 upload session Keychain items；
-5. 删除该 Domain 的 state DB、临时文件和局部日志；
-6. 从 registry 删除配置并发送状态信号。
+1. 在 registry 中把 Domain 标记为 `removal_preflight`，拒绝新 mutation，并停止主应用中该 Domain 的 SSE/reconciliation；
+2. 查询 File Provider pending set、本地 operations、upload sessions、conflicts 和 unknown outcome；存在未确认写入时默认阻断；
+3. 用户可选择继续同步后重试移除，或确认使用 `NSFileProviderDomainRemovalModePreserveDirtyUserData`；系统返回的 preserved location 必须在 UI 中展示并可从 Finder 打开；
+4. 只有确认无 dirty 数据时才可使用 `RemoveAll`。调用 `NSFileProviderManager.remove` 后等待系统完成，不能先删数据库/Keychain；
+5. 保留移除审计摘要，再删除 credential、upload session Keychain items、state DB、临时文件和局部日志；
+6. 从 registry 删除配置并发送状态信号。用于重新启用的 P2“禁用”流程另存 descriptor，不复用完整删除流程。
 
-任一步失败都保留 `removing` 恢复记录并允许重试。整个调用链没有 Cloudreve delete API，清理其他 Domain 的共享目录或 Keychain item 也被禁止。
+任一步失败都保留 `removal_preflight/removing` 恢复记录并允许重试。整个调用链没有 Cloudreve delete API，清理其他 Domain 的共享目录或 Keychain item 也被禁止。“准备卸载”按相同步骤遍历所有 Domain，并在最后注销 `SMAppService.mainApp`。
 
 ## 10. 远端事件与一致性协议
 
-### 10.1 SSE Agent
+### 10.1 主应用 SSE Coordinator
 
-每个启用 Domain 维护一个 SSE subscription：
+菜单栏主应用运行时为每个启用 Domain 维护一个 SSE subscription：
 
 ```text
 connect
@@ -695,27 +743,31 @@ connect
 ```
 
 - `client_id` 对 Domain 稳定，保存在 `sync_state`；
+- SSE parser 遵循事件流 framing，支持 CRLF、多行 `data`、comment/keep-alive，并限制单事件与累计 buffer 大小；解析失败、未知状态事件或超限都进入 degraded 并触发校准，不能静默跳过；
 - 重连退避使用 full jitter，基础 1 秒，最大 60 秒；连续失败后保持每 5 分钟尝试；
 - 事件按远端根范围过滤，越界事件只记录计数，不写入 item；
 - SSE payload 只作为变化线索；create、modify 和 rename 事件必须通过 info 或父目录列表获取完整当前 metadata 后再写 journal；
 - 同一批事件在一个短事务内映射、去重并递增 journal sequence；
+- 当前 Cloudreve 事件仅提供 `type/file_id/from/to`，没有可依赖的单调 event sequence。客户端只能以 `resumed/subscribed/reconnect-required` 作为恢复提示；异常断流或恢复语义不明时必须 reconciliation，不能宣称精确检测所有事件缺口；
+- delete 事件先按 `file_id` 查询普通树与 trash：软删除映射为 `.trashContainer` 变化，只有确认永久不存在后才写 tombstone；
 - commit 成功后再 signal 对应 parent 和 `.workingSet`，信号按 250 ms 合并；
-- Agent 每 30 秒写 heartbeat。超过 90 秒未更新时，UI 显示事件降级，Extension 可在系统请求触发时执行目标目录校准。
+- 主应用每 30 秒写 heartbeat。超过 90 秒未更新时，Domain 视为事件降级，Extension 可在系统请求触发时执行目标目录校准；心跳恢复后必须先 reconciliation，不能仅因进程重新出现就标记 healthy。
 
 ### 10.2 Reconciliation
 
 reconciliation 使用可恢复的 generation scan：
 
-1. 创建 `reconcile_runs`，记录 run UUID、范围和起始 journal sequence；
-2. 从远端根按目录广度优先分页，逐页 upsert item 并标记 `seen_generation`；
+1. 创建 `reconcile_runs`，记录 run UUID、范围、起始 journal sequence 和服务端能力快照 revision；
+2. 从远端根按目录广度优先分页，逐页 upsert item 并标记 `seen_generation`；启用 trash 时另行完整扫描 `cloudreve://trash` 并关联原父级；
 3. 每页 cursor 和完成状态持久化，进程终止后可继续；
 4. 新增和版本变化可逐页写 journal；
 5. 只有整个范围完整遍历成功，才计算未见对象；
 6. 有 pending 本地 operation 的未见对象不删除，转为冲突或单项验证；
-7. 删除候选使用稳定 remote ID 或完整父目录快照确认；身份不明确时不执行破坏性映射；
-8. 回放扫描期间收到的 SSE 变化，并对受影响目录做稳定化复查；
-9. 在最终事务中写 tombstone、journal 和成功时间；
-10. 失败时保留旧有效 anchor，Domain 保持 reconciling/error，不宣称已同步。
+7. 普通树未见对象先按 remote ID 查询 trash；确认软删除则更新为 `.trashContainer`，只有 normal/trash 两侧完整快照都未见时才成为 tombstone 候选；
+8. 删除候选使用稳定 remote ID 或同一 generation 的完整父目录快照确认；任何目录分页不稳定、不完整或能力 revision 改变时均不执行破坏性映射；
+9. 回放扫描期间收到的 SSE 变化，并对受影响目录做稳定化复查；
+10. 在最终事务中写 trash/tombstone、journal 和成功时间；
+11. 失败时保留旧有效 anchor，Domain 保持 reconciling/error，不宣称已同步。
 
 触发条件：
 
@@ -724,7 +776,7 @@ reconciliation 使用可恢复的 generation scan：
 - anchor 过期；
 - 数据库恢复或进程异常终止；
 - 用户“立即检查更新”；
-- 在线状态下每 6 小时一次，加入 Domain 级随机抖动；
+- 主应用在线时每 6 小时校准 working/materialized scope、每 24 小时在空闲和非低电量条件下做全 Domain 扫描，并加入 Domain 级随机抖动；主应用退出期间由 Extension 的目标 scope 校准兜底，不承诺周期全量扫描；
 - 本地摘要与远端枚举摘要不一致。
 
 ### 10.3 重试和幂等语义
@@ -733,8 +785,8 @@ reconciliation 使用可恢复的 generation scan：
 |---|---|
 | GET/list/info | 网络错误和 5xx 可指数退避重试 |
 | download range/stream | 支持校验后的范围恢复时重试，否则重建临时文件 |
-| create/upload complete | 仅有服务端幂等键或后置条件可确认时自动重试 |
-| rename/move/delete | 结果未知时先查询 remote ID 和目标状态 |
+| create/upload complete | 仅有服务端幂等键或能以稳定 parent/name/client operation metadata 证明唯一后置条件时自动重试 |
+| rename/move/trash/restore/delete | 结果未知时先查询 remote ID、trash 状态和目标状态 |
 | token refresh | 使用跨进程租约，只允许一个 owner 请求 |
 | conflict/permission/name error | 不重试，等待用户或 metadata 更新 |
 
@@ -771,6 +823,8 @@ sequenceDiagram
 
 callback 中的账号、远端根和显示名均视为不可信输入，必须通过 token 对应的服务端 API 再确认。
 
+在 registry commit 与 `add(domain)` 前执行重复范围检查：相同 canonical origin + account ID 下，若新旧 remote root 相同或互为祖先，则中止创建并定位现有 Domain。该检查在数据库唯一 `scope_key` 之外还需事务内执行祖先关系校验，避免并发添加绕过。
+
 ### 11.2 跨进程 token refresh
 
 1. 请求前以 60 秒偏移检查 access token；
@@ -786,7 +840,7 @@ Rust Core 不再像参考实现一样在每个进程内部独立自动刷新 tok
 
 ### 11.3 权限映射
 
-Cloudreve `permission`、item capability 和 navigator capability 映射为 File Provider item capabilities。无法确认写权限时按只读处理。权限拒绝后立即刷新 metadata，不继续展示可执行但必然失败的操作。
+Cloudreve `permission`、item capability 和 navigator capability 映射为 File Provider item capabilities。`.allowsTrashing` 只在软删除和 restore 均通过门禁时开放，`.allowsDeleting` 只对 trash 中允许永久删除的 item 开放。无法确认写权限时按只读处理。权限拒绝后立即刷新 metadata，不继续展示可执行但必然失败的操作。
 
 ## 12. 冲突设计
 
@@ -802,7 +856,7 @@ Cloudreve `permission`、item capability 和 navigator capability 映射为 File
 
 ### 12.2 冲突记录
 
-冲突保存 base、local、remote 三方版本摘要以及内容引用，不把完整文件内容复制到数据库。未解决冲突不因通知关闭、App 重启或任务清理而删除。
+冲突保存 base、local、remote 三方版本摘要、系统 pending item identifier 和 `source_generation`，不把完整文件内容或 callback URL 写进数据库。默认由 File Provider 保留 dirty 内容；如实机验证发现某类系统流程不能保证重放，才在 callback 生命周期内 clone 到该 Domain 的 File Provider temporary directory，并以有上限、可审计的 conflict artifact 管理。未解决冲突不因通知关闭、App 重启或任务清理而删除。
 
 ### 12.3 解决动作
 
@@ -812,7 +866,7 @@ Cloudreve `permission`、item capability 和 navigator capability 映射为 File
 | 覆盖远端 | 以用户确认时读取的最新 ETag 条件写入；远端再次变化则保持冲突 |
 | 保留两个版本 | 生成唯一冲突副本名，上传本地内容为新 item，原 remote item 不变 |
 
-冲突副本默认格式为 `文件名（设备名 冲突副本 YYYY-MM-DD）.ext`，重名时追加序号。所有不可逆动作在主应用中确认，通知只负责导航。
+冲突副本默认格式为 `文件名（设备名 冲突副本 YYYY-MM-DD）.ext`，重名时追加序号。所有不可逆动作在主应用中确认，通知只负责导航。主应用写入 resolution intent 后调用 `signalErrorResolved` 或请求系统重新调度相关字段；Extension 只在收到带新 content URL 的 callback 后执行覆盖/保留两个版本。若 callback 尚未重放，冲突保持 pending，不能把旧临时路径当作内容来源。
 
 ## 13. 状态、任务与后台调度
 
@@ -826,7 +880,7 @@ auth_expired
   > offline
   > reconciling
   > syncing
-  > event_degraded
+  > event_degraded / app_not_running
   > healthy
 ```
 
@@ -837,7 +891,7 @@ auth_expired
 - 无 active mutation；
 - anchor 有效；
 - 最近 reconciliation 未失败；
-- 事件通道未 degraded，或显式处于无 Agent 的受控降级状态；
+- 主应用正在运行且事件通道未 degraded；无主应用时只能显示“Finder 可用，实时更新已暂停”，不能归并为 healthy；
 - 网络离线状态未生效。
 
 ### 13.2 Operation 与 Task
@@ -861,7 +915,7 @@ auth_expired
 | reconciliation | 1 | 2 Domains |
 | SSE | 1 | 每 Domain 1 条 |
 
-同一 item 的 mutation 严格串行。后台 reconciliation 优先级低于用户打开文件和 Finder mutation。网络昂贵或低电量策略在 1.x 再产品化，1.0 只做系统 cancellation 和资源上限。
+同一 item 的 mutation 严格串行。后台 reconciliation 优先级低于用户打开文件和 Finder mutation。主应用监听睡眠/唤醒、网络路径和低电量信号，延后非紧急全量校准并加入抖动；File Provider 用户请求不因低电量被静默丢弃，仍遵循系统 cancellation 和资源上限。
 
 ## 14. 安全与隐私架构
 
@@ -880,11 +934,14 @@ auth_expired
 
 - URL 使用结构化 parser 和 origin allowlist，不通过字符串拼接；
 - API Authorization 不跨 origin；
-- 上传签名 URL 只允许 HTTP(S)，限制重定向和响应大小；
+- Release 中上传签名 URL 只允许 HTTPS，限制 host、重定向和响应大小；Debug 的 loopback 测试例外不进入发布配置；
 - 文件描述符由 Swift 在 Sandbox 权限范围内打开，Rust 不接受任意绝对路径；
 - 所有名称先做长度、保留字符、Unicode 和 collision 检查；
 - SQL 全部使用参数绑定；
 - OAuth 使用随机 state、PKCE S256 和一次性 callback 消费；
+- OAuth state/verifier 只在授权事务生命周期内保存，callback scheme 只接受预期 host/path；换 token 后再通过服务端 API 确认 account 与 remote root；
+- signed URL 的 scheme、host、port、过期时间和重定向逐 Provider 校验；不得把 Cloudreve Authorization、cookie 或 URL 查询参数转发到新 origin；
+- 自定义 Finder action/deep link 只携带本地不透明 item/conflict ID，主应用重新查询 Domain 与权限；不得信任 URL 中的远端路径或动作参数；
 - token、code、Authorization、cookie、签名查询参数、加密 key/IV 统一脱敏；
 - 默认不采集遥测，不上传实例域名、账号、文件名、路径或内容摘要；
 - 诊断导出必须由用户主动触发，并允许隐藏文件名和路径；
@@ -907,7 +964,7 @@ auth_expired
 - reconciliation 最近结果、耗时、扫描 item 数和差异数；
 - journal 最小/最大 sequence、行数和大小；
 - SQLite busy 次数、事务耗时和 WAL 大小；
-- App、Agent、Extension、Rust Core、schema 和服务端版本。
+- App、Extension、Rust Core、schema 和服务端版本。
 
 ### 15.2 Correlation ID
 
@@ -934,7 +991,7 @@ auth_expired
 - reconciliation 逐页提交并释放 DTO；
 - SQLite 查询必须覆盖 `parent_uuid`、`remote_entity_id`、`operation state` 和 `journal sequence` 索引；
 - SwiftUI 状态刷新按 Domain 和视图增量加载，不每秒重建全部 100,000 item；
-- Agent 在睡眠唤醒后加入随机延迟，避免所有 Domain 同时重连和校准。
+- 主应用在睡眠唤醒后加入随机延迟，避免所有 Domain 同时重连和校准；空闲状态不使用高频无条件轮询。
 
 性能基线沿用 PRD：popover p95 不高于 300 ms，普通目录首屏枚举 p95 不高于 2 秒，SSE 正常时远端变化 p95 不高于 5 秒，单 Domain 至少支持 100,000 item。
 
@@ -957,10 +1014,9 @@ CI 必须验证生成 bindings 与 UDL/API 定义一致。Release 不在 Xcode B
 
 | Target | 必需能力 |
 |---|---|
-| App | App Sandbox、outgoing network、App Group、Keychain Group、URL Scheme、Login Item 管理 |
+| App | App Sandbox、outgoing network、App Group、Keychain Group、URL Scheme、User Notifications |
 | File Provider | File Provider、App Sandbox、outgoing network、App Group、Keychain Group |
 | File Provider UI | File Provider UI、App Sandbox；不授予网络和 Keychain 能力 |
-| Agent | App Sandbox、outgoing network、App Group、Keychain Group、User Notifications |
 
 正式 identifier、App Group 和 Keychain Group 由签名配置注入，不硬编码在业务模块。
 
@@ -969,8 +1025,7 @@ CI 必须验证生成 bindings 与 UDL/API 定义一致。Release 不在 Xcode B
 ```text
 CloudreveMac.app
 ├── Contents/PlugIns/CloudreveFileProvider.appex
-├── Contents/PlugIns/CloudreveFileProviderUI.appex
-└── Contents/Library/LoginItems/CloudreveEventAgent.app
+└── Contents/PlugIns/CloudreveFileProviderUI.appex
 ```
 
 发布流程：Release 构建、单元与集成测试、codesign 深度校验、notary submit、staple、Gatekeeper 实机验证、生成 DMG、升级与卸载检查。
@@ -984,9 +1039,9 @@ CloudreveMac.app
 | Rust unit | URI、DTO、错误、哈希、名称、retry、journal、upload part | macOS CI |
 | Swift unit | 状态 reducer、OAuth state、Keychain wrapper、File Provider mapping | XCTest |
 | Store integration | 多进程 WAL、busy、migration、anchor、crash recovery | 临时 App Group |
-| API contract | Community/Pro、分页、ETag、SSE、Provider upload | 真实版本矩阵 |
+| API contract | Community/Pro、并发分页、ETag、删除语义、SSE、Provider upload/recovery | 真实版本矩阵 |
 | File Provider integration | Domain、枚举、download、mutation、eviction | 签名测试 App |
-| End-to-end | PRD AC-001 至 AC-010 | 真实 Finder + Cloudreve |
+| End-to-end | PRD AC-001 至 AC-012 | 真实 Finder + Cloudreve |
 | Fault injection | kill、断网、超时、磁盘满、重复事件、响应丢失 | 自动化与人工组合 |
 | Release | universal2、签名、公证、升级、卸载 | 支持的 macOS 版本 |
 
@@ -995,13 +1050,18 @@ CloudreveMac.app
 - operation 写入后、远端请求前终止；
 - 远端请求成功后、本地 commit 前终止；
 - upload part 成功后、part ETag 入库前终止；
+- create/modify callback 中止后以相同系统临时 ID/base version 和新的 content URL 重放；
+- 同一 item 上传期间再次保存，验证 source generation 串行与旧结果不覆盖新内容；
 - 最后一页枚举前网络中断；
+- page-number/cursor 枚举期间远端插入、删除、改名，验证快照无重无漏或明确失效；
 - reconciliation 遍历完成前中断；
 - Keychain refresh 成功后、lease 释放前终止；
 - journal commit 后、`signalEnumerator` 前终止；
+- materialized set 更新后、working-set signal 前终止；
 - SQLite busy、损坏、磁盘满；
+- migration 准备/提交时旧 Extension 尝试写入；
 - SSE 重复、乱序、缺口和 reconnect-required；
-- rename/move/delete 请求返回超时但服务端实际已执行。
+- rename/move/trash/restore/delete 请求返回超时但服务端实际已执行。
 
 ### 18.3 PRD 可追踪性
 
@@ -1009,11 +1069,11 @@ CloudreveMac.app
 |---|---|
 | Domain + Auth | FR-AUTH、FR-DOM、AC-001、AC-007、AC-008 |
 | File Provider read path | FR-FP、AC-002、AC-009 |
-| Operation saga + uploader | FR-UP、AC-003、AC-005、AC-010 |
-| Journal + SSE + reconcile | FR-EVT、AC-004、AC-010 |
+| Operation saga + uploader | FR-UP、AC-003、AC-005、AC-010、AC-012 |
+| Journal + SSE + reconcile | FR-EVT、AC-004、AC-010、AC-011 |
 | Conflict store | FR-CNF、AC-006 |
-| State/task projection | FR-TSK、FR-LIFE |
-| Keychain + redaction | FR-DIA、NFR Security |
+| State/task projection | FR-TSK、FR-LIFE、AC-011、AC-012 |
+| Keychain + redaction | FR-AUTH、FR-DIA、PRD 10.4 |
 | Finder enhancements | FR-FND、FR-IGN、P1 验收 |
 
 ## 19. 协议兼容门禁
@@ -1023,10 +1083,14 @@ CloudreveMac.app
 | 门禁 | 通过条件 | 不通过时的产品行为 |
 |---|---|---|
 | 稳定实体 ID | rename/move 后 `FileResponse.id` 保持稳定，或事件提供可靠旧新关联 | Domain 降为只读预览，禁止不安全写入 |
-| 完整分页 | page/next token 能无重无漏遍历 10,000 item | 不发布该服务端版本支持 |
+| 完整分页 | page/next token 在静态及并发 create/rename/delete 下能无重无漏遍历 10,000 item，或能构造客户端稳定 snapshot | 不发布该服务端版本支持 |
 | 条件内容写 | `previous` 能可靠拒绝 stale version | 禁止覆盖修改，只允许新建/下载 |
+| 幂等创建 | 文件/目录创建支持客户端幂等键，或响应丢失后可通过唯一且抗竞争的后置条件找回同一对象 | 禁用对应创建能力，不以路径猜测后盲目重试 |
 | 条件 metadata mutation | rename/move/delete 可绑定 entity/version，或服务端提供等价幂等契约 | 对缺失契约的操作返回“不受支持”，不得用路径盲写 |
-| 上传恢复 | session、part ETag 和 completion 可跨进程恢复或查询 | 对应 Provider 不列入 1.0 支持矩阵 |
+| 内容版本语义 | `primary_entity`/ETag 的稳定性、内容变化与 metadata-only 变化行为可复现 | 不用于 `contentVersion` 或条件写，相关修改能力降级 |
+| 上传恢复 | session 可恢复；同一 part index 重放幂等或可查询；part ETag 与 completion 结果可跨进程确认 | 对应 Provider 不列入 1.0 支持矩阵 |
+| 上传回调返回对象 | Provider completion 后能可靠查询最终 `FileResponse`/entity/version | operation 保持 verifying，不向 File Provider 返回假成功 |
+| 删除语义 | 软删除、trash 枚举、restore、永久删除、递归与批量部分失败可复现 | 隐藏 trash/delete capability，不能把普通 Finder 删除降级为永久删除 |
 | SSE 恢复 | subscribed/resumed/reconnect-required 语义可复现 | 始终显示 event degraded，并提高 reconciliation 频率 |
 | 账号身份 | token 可查询稳定 user/account ID | 禁止原 Domain 原地重新授权 |
 | TLS/代理 | 系统根、私有 CA 和系统代理行为符合预期 | 阻断相关网络环境的发布声明 |
@@ -1041,9 +1105,15 @@ CloudreveMac.app
 serverVersion
 stableEntityIdentity
 cursorPagination
+snapshotSafePagination
 conditionalContentWrite
+idempotentCreate
 conditionalMetadataMutation
+contentVersionSemantics
 resumableUploadProviders[]
+uploadCompletionQueryableProviders[]
+deleteSemantics
+trashRestore
 sseResume
 thumbnail
 ```
@@ -1055,12 +1125,13 @@ thumbnail
 ### 阶段 0：协议与 File Provider Spike
 
 - 完成第 19 节全部 P0 门禁探测；
-- 建立 Xcode 四个产品 Target 和最小 XCFramework；
+- 建立 Xcode 三个产品 Target（App、File Provider、File Provider UI）和最小 XCFramework；
 - 注册单 Domain，完成分页枚举、完整下载、内容修改；
-- 强杀 Extension 并验证 operation 恢复；
+- 验证 create callback 重放、trash/restore、组合字段修改和 working/materialized set；
+- 强杀 Extension 并验证 operation 使用新 content URL 恢复；
 - 冻结最低 macOS 版本和受支持 Cloudreve/Provider 矩阵。
 
-退出标准：真实 Finder 中稳定展示并打开文件；修改具备条件写；进程终止后不重复创建或假成功。
+退出标准：真实 Finder 中稳定展示并打开文件；修改具备条件写；创建具备幂等契约；进程终止后不重复创建或假成功。
 
 ### 阶段 1：持久化与读路径
 
@@ -1073,21 +1144,21 @@ thumbnail
 
 ### 阶段 2：写路径与上传恢复
 
-- create/modify/move/rename/delete operation saga；
-- 全 Provider uploader 重构；
+- create/modify/move/rename/trash/restore/delete operation saga；
+- 按发布支持矩阵逐个重构并验证 Provider uploader；
 - Keychain upload secret、part checkpoint、source fingerprint；
 - 冲突持久化和三种 P0 解决动作。
 
-退出标准：AC-003、AC-005、AC-006、AC-010 通过故障注入。
+退出标准：AC-003、AC-005、AC-006、AC-008、AC-010 通过故障注入。
 
 ### 阶段 3：SSE 与最终一致性
 
-- Login Item Agent、SSE supervisor、heartbeat；
+- 主应用 EventCoordinator、SSE supervisor、heartbeat 与 `SMAppService.mainApp` 登录启动；
 - generation reconciliation、稳定化复查、journal compaction；
 - event degraded、offline 和 auth refresh 协调；
 - 多 Domain 公平调度。
 
-退出标准：事件缺失、服务端重启、睡眠唤醒和 Agent 强杀后自动收敛。
+退出标准：事件缺失、服务端重启、睡眠唤醒、主应用退出和强杀后，Finder 请求保持可用；主应用恢复后自动校准并收敛。
 
 ### 阶段 4：1.0 产品能力
 
@@ -1096,15 +1167,15 @@ thumbnail
 - 排除规则、11 种语言和可访问性；
 - universal2、签名、公证、升级和卸载。
 
-退出标准：PRD P0 + P1 和 AC-001 至 AC-010 全部通过，无发布阻断项。
+退出标准：PRD P0 + P1 和 AC-001 至 AC-012 全部通过，无发布阻断项。
 
 ## 21. 发布验收
 
 1. 支持矩阵内的 Cloudreve 版本和 Provider 全部通过自动 contract test；
 2. 多 Domain 在 Finder 中独立工作，身份不会因改名、移动或重新授权改变；
-3. 完整下载、eviction、创建、修改、移动、重命名和删除均有真实 Finder E2E；
+3. 完整下载、eviction、创建、修改、移动、重命名、移到废纸篓、恢复和永久删除均有真实 Finder E2E；
 4. SSE 丢失和 anchor 过期均能触发 reconciliation 并最终收敛；
-5. Extension、Agent、App 任意终止后无静默丢任务、重复创建和假成功；
+5. Extension 或 App 任意终止后无静默丢任务、重复创建和假成功，callback 重放不依赖旧临时路径；
 6. 上传能从已完成分片恢复，session secret 不进入 SQLite 或日志；
 7. 所有冲突保留至少一个可恢复版本，未解决项重启后仍存在；
 8. Domain 移除只清理本地状态，不调用远端 delete；
@@ -1117,8 +1188,8 @@ thumbnail
 2. Apple 平台能力固定由 Swift 实现，Cloudreve 协议与传输固定由 Rust Core 实现。
 3. UniFFI 是唯一业务 FFI；大文件通过受控 FD 流式传输。
 4. SQLite WAL 是恢复与跨进程状态事实源，Keychain 是唯一秘密持久化位置。
-5. Agent 提供实时性，Extension 保证系统请求可独立完成，reconciliation 保证最终正确。
+5. 主应用提供 SSE 实时性、周期校准和通知，Extension 保证系统请求可独立完成，reconciliation 保证最终正确。
 6. 所有 mutation 通过持久 operation saga、条件版本和后置验证执行。
-7. 任何无法满足稳定 identity、条件 mutation 或上传恢复的服务端/Provider，不进入 1.0 可写支持矩阵。
+7. 任何无法满足稳定 identity、幂等创建、条件 mutation、trash/delete 语义或上传恢复的服务端/Provider，不进入 1.0 对应可写能力矩阵。
 
 该基线可直接用于建立工程、拆分模块和编写阶段计划。后续若 File Provider Spike 或 Cloudreve contract test 证明某项平台契约不成立，应先同步修改 PRD、本文档和验收矩阵，再调整实现。
