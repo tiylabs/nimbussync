@@ -13,8 +13,16 @@ fn main() {
 }
 
 fn build_xcframework() {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().unwrap().to_path_buf();
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .to_path_buf();
     let script = root.join("../Scripts/xtask/build-xcframework.sh");
-    let status = Command::new("sh").arg(script).status().expect("failed to run XCFramework builder");
-    if !status.success() { std::process::exit(status.code().unwrap_or(1)); }
+    let status = Command::new("sh")
+        .arg(script)
+        .status()
+        .expect("failed to run XCFramework builder");
+    if !status.success() {
+        std::process::exit(status.code().unwrap_or(1));
+    }
 }

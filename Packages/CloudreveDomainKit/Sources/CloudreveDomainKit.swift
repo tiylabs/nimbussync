@@ -35,30 +35,88 @@ public struct RemoteScope: Codable, Hashable, Sendable {
     public let rootURI: String
 
     public init(origin: String, accountID: String, rootURI: String) throws {
-        guard !accountID.isEmpty, var components = URLComponents(string: origin), components.scheme?.lowercased() == "https", let host = components.host, !host.isEmpty, components.user == nil, components.password == nil, components.query == nil, components.fragment == nil else {
+        guard !accountID.isEmpty, !accountID.contains(where: { $0 == "\0" || $0.isWhitespace }), var components = URLComponents(string: origin), components.scheme?.lowercased() == "https", let host = components.host, !host.isEmpty, components.user == nil, components.password == nil, components.query == nil, components.fragment == nil else {
             throw CloudreveIdentifierError.sensitiveValue
         }
         components.scheme = "https"
         components.host = host.lowercased()
         if components.port == 443 { components.port = nil }
         guard let canonicalOrigin = components.url?.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/")) else { throw CloudreveIdentifierError.sensitiveValue }
-        var normalizedPath = rootURI.replacingOccurrences(of: "\\", with: "/")
-        guard !normalizedPath.split(separator: "/").contains("..") else { throw CloudreveIdentifierError.sensitiveValue }
-        if !normalizedPath.hasPrefix("/") { normalizedPath = "/" + normalizedPath }
-        normalizedPath = "/" + normalizedPath.split(separator: "/").filter { !$0.isEmpty && $0 != "." }.joined(separator: "/")
         self.origin = canonicalOrigin
         self.accountID = accountID
-        self.rootURI = normalizedPath == "/" ? "/" : normalizedPath
+        self.rootURI = try CloudreveRemoteURI.canonical(rootURI, accountID: accountID)
     }
 
     public var key: String { "\(origin)\u{0}\(accountID)\u{0}\(rootURI)" }
 
     public func overlaps(_ other: RemoteScope) -> Bool {
         guard origin == other.origin, accountID == other.accountID else { return false }
-        let slash = CharacterSet(charactersIn: "/")
-        let left = rootURI.trimmingCharacters(in: slash)
-        let right = other.rootURI.trimmingCharacters(in: slash)
-        return left == right || left.isEmpty || right.isEmpty || left.hasPrefix(right + "/") || right.hasPrefix(left + "/")
+        return CloudreveRemoteURI.overlaps(rootURI, other.rootURI)
+    }
+}
+
+public enum CloudreveRemoteURI {
+    public static func canonical(_ rawValue: String, accountID: String) throws -> String {
+        let raw = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        if raw.hasPrefix("cloudreve://") {
+            guard var components = URLComponents(string: raw), let host = components.host, host.lowercased() == "my", components.password == nil, components.query == nil, components.fragment == nil else { throw CloudreveIdentifierError.sensitiveValue }
+            let path = try normalizedPath(components.path)
+            components.scheme = "cloudreve"
+            components.host = host.lowercased()
+            components.port = nil
+            if components.user == nil && components.host == "my" { components.user = accountID }
+            guard components.user == nil || components.user == accountID else { throw CloudreveIdentifierError.sensitiveValue }
+            components.path = path
+            guard let value = components.string else { throw CloudreveIdentifierError.sensitiveValue }
+            return value.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        }
+        let path = try normalizedPath(raw)
+        let encodedAccount = accountID.addingPercentEncoding(withAllowedCharacters: .urlUserAllowed) ?? accountID
+        return "cloudreve://\(encodedAccount)@my\(path == "/" ? "" : path)"
+    }
+
+    public static func path(_ value: String) -> String? {
+        if value.hasPrefix("cloudreve://"), let components = URLComponents(string: value) { return try? normalizedPath(components.path) }
+        return try? normalizedPath(value)
+    }
+
+    public static func append(_ parent: String, name: String) throws -> String {
+        guard !name.isEmpty, !name.contains("/"), !name.contains("\\"), name != ".", name != ".." else { throw CloudreveIdentifierError.sensitiveValue }
+        guard var components = URLComponents(string: parent), components.scheme == "cloudreve" else { throw CloudreveIdentifierError.sensitiveValue }
+        let parentPath = try normalizedPath(components.path)
+        components.path = parentPath == "/" ? "/\(name)" : "\(parentPath)/\(name)"
+        guard let result = components.string else { throw CloudreveIdentifierError.sensitiveValue }
+        return result
+    }
+
+    public static func parent(_ value: String) -> String? {
+        guard var components = URLComponents(string: value), components.scheme == "cloudreve", let path = try? normalizedPath(components.path) else { return nil }
+        let segments = path.split(separator: "/")
+        components.path = segments.count <= 1 ? "/" : "/" + segments.dropLast().joined(separator: "/")
+        return components.string
+    }
+
+    public static func overlaps(_ left: String, _ right: String) -> Bool {
+        guard let leftComponents = URLComponents(string: left), let rightComponents = URLComponents(string: right), leftComponents.scheme == "cloudreve", rightComponents.scheme == "cloudreve", leftComponents.host?.lowercased() == rightComponents.host?.lowercased(), leftComponents.user == rightComponents.user, let leftPath = path(left), let rightPath = path(right) else { return false }
+        return leftPath == rightPath || leftPath == "/" || rightPath == "/" || leftPath.hasPrefix(rightPath + "/") || rightPath.hasPrefix(leftPath + "/")
+    }
+
+    public static func isWithin(_ value: String, root: String) -> Bool {
+        guard let valueComponents = URLComponents(string: value), let rootComponents = URLComponents(string: root), valueComponents.scheme == rootComponents.scheme, valueComponents.host?.lowercased() == rootComponents.host?.lowercased(), valueComponents.user == rootComponents.user, let valuePath = path(value), let rootPath = path(root) else { return false }
+        return rootPath == "/" || valuePath == rootPath || valuePath.hasPrefix(rootPath + "/")
+    }
+
+    public static func relativePath(_ value: String, root: String) -> String? {
+        guard isWithin(value, root: root), let valuePath = path(value), let rootPath = path(root) else { return nil }
+        guard rootPath != "/" else { return valuePath.trimmingCharacters(in: CharacterSet(charactersIn: "/")) }
+        return String(valuePath.dropFirst(rootPath.count).trimmingCharacters(in: CharacterSet(charactersIn: "/")))
+    }
+
+    private static func normalizedPath(_ rawPath: String) throws -> String {
+        let normalized = rawPath.replacingOccurrences(of: "\\", with: "/")
+        guard !normalized.split(separator: "/").contains(where: { $0 == ".." || $0.contains("\0") }) else { throw CloudreveIdentifierError.sensitiveValue }
+        let parts = normalized.split(separator: "/").filter { !$0.isEmpty && $0 != "." }
+        return parts.isEmpty ? "/" : "/" + parts.joined(separator: "/")
     }
 }
 
@@ -99,7 +157,10 @@ public struct CapabilitySnapshot: Codable, Equatable, Sendable {
 
     public var allowsWrite: Bool { stableItemIdentity == .verified && stableRootIdentity == .verified && conditionalContentWrite == .verified && idempotentCreate == .verified }
     public func provider(named name: String) -> Provider? { providers.first { $0.name == name } }
-    public func canWrite(provider providerName: String) -> Bool { allowsWrite && self.provider(named: providerName)?.write == .verified && self.provider(named: providerName)?.resumable != .unsupported }
+    public func canWrite(provider providerName: String) -> Bool {
+        guard allowsWrite, let provider = provider(named: providerName) else { return false }
+        return provider.write == .verified && provider.resumable == .verified && provider.zeroByte == .verified
+    }
 }
 
 public struct ItemVersion: Codable, Equatable, Sendable {
@@ -112,6 +173,7 @@ public struct RemoteItem: Codable, Equatable, Sendable {
     public let itemIdentifier: String
     public var remoteID: String?
     public var parentIdentifier: String?
+    public var trashOriginalParentIdentifier: String?
     public var name: String
     public var uri: String
     public var kind: RemoteItemKind
@@ -119,6 +181,8 @@ public struct RemoteItem: Codable, Equatable, Sendable {
     public var size: Int64
     public var remoteVersion: String?
     public var version: ItemVersion
+    public var creationDate: Date?
+    public var contentModificationDate: Date?
     public var canRead: Bool
     public var canWrite: Bool
     public var canAddChildren: Bool
@@ -127,12 +191,12 @@ public struct RemoteItem: Codable, Equatable, Sendable {
     public var trashed: Bool
     public var tombstone: Bool
 
-    public init(itemIdentifier: String = CloudreveIdentifier.item(), remoteID: String? = nil, parentIdentifier: String? = nil, name: String, uri: String, kind: RemoteItemKind, contentType: String, size: Int64 = 0, remoteVersion: String? = nil, version: ItemVersion, canRead: Bool = true, canWrite: Bool = false, canAddChildren: Bool = false, canTrash: Bool = false, canDelete: Bool = false, trashed: Bool = false, tombstone: Bool = false) {
-        self.itemIdentifier = itemIdentifier; self.remoteID = remoteID; self.parentIdentifier = parentIdentifier; self.name = name; self.uri = uri; self.kind = kind; self.contentType = contentType; self.size = size; self.remoteVersion = remoteVersion; self.version = version; self.canRead = canRead; self.canWrite = canWrite; self.canAddChildren = canAddChildren; self.canTrash = canTrash; self.canDelete = canDelete; self.trashed = trashed; self.tombstone = tombstone
+    public init(itemIdentifier: String = CloudreveIdentifier.item(), remoteID: String? = nil, parentIdentifier: String? = nil, name: String, uri: String, kind: RemoteItemKind, contentType: String, size: Int64 = 0, remoteVersion: String? = nil, version: ItemVersion, creationDate: Date? = nil, contentModificationDate: Date? = nil, trashOriginalParentIdentifier: String? = nil, canRead: Bool = true, canWrite: Bool = false, canAddChildren: Bool = false, canTrash: Bool = false, canDelete: Bool = false, trashed: Bool = false, tombstone: Bool = false) {
+        self.itemIdentifier = itemIdentifier; self.remoteID = remoteID; self.parentIdentifier = parentIdentifier; self.trashOriginalParentIdentifier = trashOriginalParentIdentifier; self.name = name; self.uri = uri; self.kind = kind; self.contentType = contentType; self.size = size; self.remoteVersion = remoteVersion; self.version = version; self.creationDate = creationDate; self.contentModificationDate = contentModificationDate; self.canRead = canRead; self.canWrite = canWrite; self.canAddChildren = canAddChildren; self.canTrash = canTrash; self.canDelete = canDelete; self.trashed = trashed; self.tombstone = tombstone
     }
 
     public func withIdentity(_ identifier: String, parentIdentifier: String? = nil) -> RemoteItem {
-        RemoteItem(itemIdentifier: identifier, remoteID: remoteID, parentIdentifier: parentIdentifier ?? self.parentIdentifier, name: name, uri: uri, kind: kind, contentType: contentType, size: size, remoteVersion: remoteVersion, version: version, canRead: canRead, canWrite: canWrite, canAddChildren: canAddChildren, canTrash: canTrash, canDelete: canDelete, trashed: trashed, tombstone: tombstone)
+        RemoteItem(itemIdentifier: identifier, remoteID: remoteID, parentIdentifier: parentIdentifier ?? self.parentIdentifier, name: name, uri: uri, kind: kind, contentType: contentType, size: size, remoteVersion: remoteVersion, version: version, creationDate: creationDate, contentModificationDate: contentModificationDate, trashOriginalParentIdentifier: trashOriginalParentIdentifier, canRead: canRead, canWrite: canWrite, canAddChildren: canAddChildren, canTrash: canTrash, canDelete: canDelete, trashed: trashed, tombstone: tombstone)
     }
 }
 
@@ -232,6 +296,7 @@ public enum DomainHealthReducer {
 public struct DomainDescriptor: Codable, Equatable, Sendable {
     public let identifier: String
     public var displayName: String
+    public var iconURL: URL?
     public let scope: RemoteScope
     public let rootRemoteID: String
     public var currentRootURI: String
@@ -240,13 +305,13 @@ public struct DomainDescriptor: Codable, Equatable, Sendable {
     public var capabilitySnapshot: CapabilitySnapshot
     public var secretReference: String
 
-    public init(displayName: String, scope: RemoteScope, rootRemoteID: String, accountID: String, secretReference: String, capabilitySnapshot: CapabilitySnapshot = CapabilitySnapshot()) {
-        self.identifier = CloudreveIdentifier.domain(); self.displayName = displayName; self.scope = scope; self.rootRemoteID = rootRemoteID; self.currentRootURI = scope.rootURI; self.accountID = accountID; self.status = .initializing; self.capabilitySnapshot = capabilitySnapshot; self.secretReference = secretReference
+    public init(displayName: String, scope: RemoteScope, rootRemoteID: String, accountID: String, secretReference: String, capabilitySnapshot: CapabilitySnapshot = CapabilitySnapshot(), iconURL: URL? = nil) {
+        self.identifier = CloudreveIdentifier.domain(); self.displayName = displayName; self.iconURL = iconURL; self.scope = scope; self.rootRemoteID = rootRemoteID; self.currentRootURI = scope.rootURI; self.accountID = accountID; self.status = .initializing; self.capabilitySnapshot = capabilitySnapshot; self.secretReference = secretReference
     }
 }
 
 public enum CoreErrorCode: String, Codable, Sendable {
-    case authentication, network, permissionDenied = "permission_denied", notFound = "not_found", quotaExceeded = "quota_exceeded", versionConflict = "version_conflict", nameCollision = "name_collision", invalidName = "invalid_name", integrityFailure = "integrity_failure", cancelled, unsupportedServer = "unsupported_server", database, unsupportedMetadata = "unsupported_metadata", rootUnavailable = "root_unavailable", unknownOutcome = "unknown_outcome", awaitingSourceReplay = "awaiting_source_replay", excludedFromSync = "excluded_from_sync", directoryNotEmpty = "directory_not_empty", cannotSynchronize = "cannot_synchronize"
+    case authentication, network, permissionDenied = "permission_denied", notFound = "not_found", quotaExceeded = "quota_exceeded", versionConflict = "version_conflict", nameCollision = "name_collision", invalidName = "invalid_name", integrityFailure = "integrity_failure", cancelled, unsupportedServer = "unsupported_server", database, unsupportedMetadata = "unsupported_metadata", rootUnavailable = "root_unavailable", scopeConflict = "scope_conflict", unknownOutcome = "unknown_outcome", awaitingSourceReplay = "awaiting_source_replay", excludedFromSync = "excluded_from_sync", directoryNotEmpty = "directory_not_empty", cannotSynchronize = "cannot_synchronize"
 }
 
 public struct CoreFailure: Error, Equatable, Sendable {

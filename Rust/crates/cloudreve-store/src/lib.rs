@@ -129,26 +129,41 @@ impl StateStore {
             "INSERT OR IGNORE INTO schema_meta (singleton, version, generation, compat_min, compat_max, migration_state) VALUES (1, ?1, 1, ?1, ?1, 'ready')",
             params![SCHEMA_VERSION],
         )?;
-        let version: i64 = transaction.query_row("SELECT version FROM schema_meta WHERE singleton = 1", [], |row| row.get(0))?;
+        let version: i64 = transaction.query_row(
+            "SELECT version FROM schema_meta WHERE singleton = 1",
+            [],
+            |row| row.get(0),
+        )?;
         if version != SCHEMA_VERSION {
-            return Err(StoreError::SchemaFenced(format!("expected {}, found {}", SCHEMA_VERSION, version)));
+            return Err(StoreError::SchemaFenced(format!(
+                "expected {}, found {}",
+                SCHEMA_VERSION, version
+            )));
         }
         transaction.commit()?;
         Ok(())
     }
 
     pub fn quick_check(&self) -> Result<bool, StoreError> {
-        let result: String = self.connection.query_row("PRAGMA quick_check", [], |row| row.get(0))?;
+        let result: String = self
+            .connection
+            .query_row("PRAGMA quick_check", [], |row| row.get(0))?;
         Ok(result.eq_ignore_ascii_case("ok"))
     }
 
     pub fn schema_version(&self) -> Result<i64, StoreError> {
-        Ok(self.connection.query_row("SELECT version FROM schema_meta WHERE singleton = 1", [], |row| row.get(0))?)
+        Ok(self.connection.query_row(
+            "SELECT version FROM schema_meta WHERE singleton = 1",
+            [],
+            |row| row.get(0),
+        )?)
     }
 
     pub fn backup_to(&self, destination: impl AsRef<Path>) -> Result<(), StoreError> {
-        self.connection.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)")?;
-        self.connection.backup(rusqlite::MAIN_DB, destination, None)?;
+        self.connection
+            .execute_batch("PRAGMA wal_checkpoint(TRUNCATE)")?;
+        self.connection
+            .backup(rusqlite::MAIN_DB, destination, None)?;
         Ok(())
     }
 
@@ -189,44 +204,123 @@ impl StateStore {
             params![sequence + 1, domain_version + 1],
         )?;
         transaction.commit()?;
-        Ok(JournalEntry { sequence, epoch, record: change.clone() })
+        Ok(JournalEntry {
+            sequence,
+            epoch,
+            record: change.clone(),
+        })
     }
 
     pub fn current_anchor(&self, domain_id: Uuid, scope: &str) -> Result<SyncAnchor, StoreError> {
-        let (epoch_string, sequence, min_sequence): (String, i64, i64) = self.connection.query_row(
+        let (epoch_string, sequence, min_sequence): (String, i64, i64) = self
+            .connection
+            .query_row(
             "SELECT epoch, next_sequence, min_valid_sequence FROM sync_state WHERE singleton = 1",
             [],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )?;
-        Ok(SyncAnchor { version: 1, domain_id, scope: scope.to_string(), epoch: Uuid::parse_str(&epoch_string).unwrap_or_else(|_| Uuid::new_v4()), sequence: sequence.saturating_sub(1).max(min_sequence as i64) as u64 })
+        Ok(SyncAnchor {
+            version: 1,
+            domain_id,
+            scope: scope.to_string(),
+            epoch: Uuid::parse_str(&epoch_string).unwrap_or_else(|_| Uuid::new_v4()),
+            sequence: sequence.saturating_sub(1).max(min_sequence as i64) as u64,
+        })
     }
 
-    pub fn enumerate_changes(&self, anchor: &SyncAnchor, limit: usize, domain_id: Uuid, scope: &str) -> Result<ChangeBatch, StoreError> {
+    pub fn enumerate_changes(
+        &self,
+        anchor: &SyncAnchor,
+        limit: usize,
+        domain_id: Uuid,
+        scope: &str,
+    ) -> Result<ChangeBatch, StoreError> {
         let current = self.current_anchor(domain_id, scope)?;
-        let min_sequence: i64 = self.connection.query_row("SELECT min_valid_sequence FROM sync_state WHERE singleton = 1", [], |row| row.get(0))?;
-        anchor.validate(domain_id, scope, current.epoch, min_sequence.max(0) as u64).map_err(|_| StoreError::SchemaFenced("sync anchor expired or mismatched".into()))?;
+        let min_sequence: i64 = self.connection.query_row(
+            "SELECT min_valid_sequence FROM sync_state WHERE singleton = 1",
+            [],
+            |row| row.get(0),
+        )?;
+        anchor
+            .validate(domain_id, scope, current.epoch, min_sequence.max(0) as u64)
+            .map_err(|_| StoreError::SchemaFenced("sync anchor expired or mismatched".into()))?;
         let mut statement = self.connection.prepare(
             "SELECT sequence, epoch, item_uuid, old_parent_uuid, new_parent_uuid, change_kind, version, origin FROM change_journal WHERE sequence > ?1 ORDER BY sequence ASC LIMIT ?2",
         )?;
-        let rows = statement.query_map(params![anchor.sequence as i64, limit.max(1) as i64], |row| {
-            let item_id = Uuid::parse_str(&row.get::<_, String>(2)?).map_err(|_| rusqlite::Error::InvalidQuery)?;
-            let old_parent_id = row.get::<_, Option<String>>(3)?.and_then(|value| Uuid::parse_str(&value).ok());
-            let new_parent_id = row.get::<_, Option<String>>(4)?.and_then(|value| Uuid::parse_str(&value).ok());
-            let epoch = Uuid::parse_str(&row.get::<_, String>(1)?).map_err(|_| rusqlite::Error::InvalidQuery)?;
-            Ok(JournalEntry { sequence: row.get(0)?, epoch, record: ChangeRecord { item_id, old_parent_id, new_parent_id, kind: row.get(5)?, version: row.get(6)?, origin: row.get(7)?, provider_visible: true } })
-        })?.collect::<Result<Vec<_>, _>>()?;
-        let scanned_last = rows.last().map(|entry| entry.sequence as u64).unwrap_or(anchor.sequence);
+        let rows = statement
+            .query_map(
+                params![anchor.sequence as i64, limit.max(1) as i64],
+                |row| {
+                    let item_id = Uuid::parse_str(&row.get::<_, String>(2)?)
+                        .map_err(|_| rusqlite::Error::InvalidQuery)?;
+                    let old_parent_id = row
+                        .get::<_, Option<String>>(3)?
+                        .and_then(|value| Uuid::parse_str(&value).ok());
+                    let new_parent_id = row
+                        .get::<_, Option<String>>(4)?
+                        .and_then(|value| Uuid::parse_str(&value).ok());
+                    let epoch = Uuid::parse_str(&row.get::<_, String>(1)?)
+                        .map_err(|_| rusqlite::Error::InvalidQuery)?;
+                    Ok(JournalEntry {
+                        sequence: row.get(0)?,
+                        epoch,
+                        record: ChangeRecord {
+                            item_id,
+                            old_parent_id,
+                            new_parent_id,
+                            kind: row.get(5)?,
+                            version: row.get(6)?,
+                            origin: row.get(7)?,
+                            provider_visible: true,
+                        },
+                    })
+                },
+            )?
+            .collect::<Result<Vec<_>, _>>()?;
+        let scanned_count = rows.len();
+        let scanned_last = rows
+            .last()
+            .map(|entry| entry.sequence as u64)
+            .unwrap_or(anchor.sequence);
         let is_working_set = scope == "working_set";
-        let rows = rows.into_iter().filter(|entry| is_working_set || entry.record.old_parent_id.map(|id| format!("cri-{id}") == scope).unwrap_or(false) || entry.record.new_parent_id.map(|id| format!("cri-{id}") == scope).unwrap_or(false)).collect::<Vec<_>>();
+        let rows = rows
+            .into_iter()
+            .filter(|entry| {
+                is_working_set
+                    || entry
+                        .record
+                        .old_parent_id
+                        .map(|id| format!("cri-{id}") == scope)
+                        .unwrap_or(false)
+                    || entry
+                        .record
+                        .new_parent_id
+                        .map(|id| format!("cri-{id}") == scope)
+                        .unwrap_or(false)
+            })
+            .collect::<Vec<_>>();
         let last_sequence = scanned_last;
-        let more = rows.len() >= limit.max(1) && self.connection.query_row::<i64, _, _>("SELECT COUNT(*) FROM change_journal WHERE sequence > ?1", params![last_sequence as i64], |row| row.get(0))? > 0;
+        let more = scanned_count >= limit.max(1)
+            && self.connection.query_row::<i64, _, _>(
+                "SELECT COUNT(*) FROM change_journal WHERE sequence > ?1",
+                params![last_sequence as i64],
+                |row| row.get(0),
+            )? > 0;
         let mut next = current.clone();
         next.sequence = last_sequence;
-        Ok(ChangeBatch { changes: rows, next_anchor: next, more_coming: more })
+        Ok(ChangeBatch {
+            changes: rows,
+            next_anchor: next,
+            more_coming: more,
+        })
     }
 
     pub fn pending_outbox_count(&self) -> Result<i64, StoreError> {
-        Ok(self.connection.query_row("SELECT COUNT(*) FROM signal_outbox WHERE state = 'pending'", [], |row| row.get(0))?)
+        Ok(self.connection.query_row(
+            "SELECT COUNT(*) FROM signal_outbox WHERE state = 'pending'",
+            [],
+            |row| row.get(0),
+        )?)
     }
 
     pub fn acknowledge_outbox(&mut self, revision: i64) -> Result<(), StoreError> {
@@ -234,7 +328,10 @@ impl StateStore {
         Ok(())
     }
 
-    pub fn upsert_operation(&mut self, operation: &OperationRecord) -> Result<OperationRecord, StoreError> {
+    pub fn upsert_operation(
+        &mut self,
+        operation: &OperationRecord,
+    ) -> Result<OperationRecord, StoreError> {
         if let Some(existing) = self.connection.query_row(
             "SELECT operation_id, replay_key, kind, item_uuid, state, source_generation, cancel_requested FROM operations WHERE replay_key = ?1",
             params![operation.replay_key],
@@ -249,7 +346,13 @@ impl StateStore {
         Ok(operation.clone())
     }
 
-    pub fn commit_operation(&mut self, operation_id: Uuid, state: &str, item_id: Option<Uuid>, outcome: Option<&str>) -> Result<(), StoreError> {
+    pub fn commit_operation(
+        &mut self,
+        operation_id: Uuid,
+        state: &str,
+        item_id: Option<Uuid>,
+        outcome: Option<&str>,
+    ) -> Result<(), StoreError> {
         self.connection.execute(
             "UPDATE operations SET state = ?1, item_uuid = ?2, outcome = ?3, updated_at = unixepoch() WHERE operation_id = ?4",
             params![state, item_id.map(|value| value.to_string()), outcome, operation_id.to_string()],
@@ -257,19 +360,30 @@ impl StateStore {
         Ok(())
     }
 
-    pub fn operation_outcome(&self, replay_key: &str) -> Result<Option<(String, Option<Uuid>, Option<String>)>, StoreError> {
-        self.connection.query_row(
-            "SELECT state, item_uuid, outcome FROM operations WHERE replay_key = ?1",
-            params![replay_key],
-            |row| {
-                let item_id = row.get::<_, Option<String>>(1)?.and_then(|value| Uuid::parse_str(&value).ok());
-                Ok((row.get(0)?, item_id, row.get(2)?))
-            },
-        ).optional().map_err(StoreError::from)
+    pub fn operation_outcome(
+        &self,
+        replay_key: &str,
+    ) -> Result<Option<(String, Option<Uuid>, Option<String>)>, StoreError> {
+        self.connection
+            .query_row(
+                "SELECT state, item_uuid, outcome FROM operations WHERE replay_key = ?1",
+                params![replay_key],
+                |row| {
+                    let item_id = row
+                        .get::<_, Option<String>>(1)?
+                        .and_then(|value| Uuid::parse_str(&value).ok());
+                    Ok((row.get(0)?, item_id, row.get(2)?))
+                },
+            )
+            .optional()
+            .map_err(StoreError::from)
     }
 
     pub fn request_cancel(&mut self, operation_id: Uuid) -> Result<(), StoreError> {
-        self.connection.execute("UPDATE operations SET cancel_requested = 1 WHERE operation_id = ?1", params![operation_id.to_string()])?;
+        self.connection.execute(
+            "UPDATE operations SET cancel_requested = 1 WHERE operation_id = ?1",
+            params![operation_id.to_string()],
+        )?;
         Ok(())
     }
 
@@ -283,12 +397,27 @@ impl StateStore {
     }
 
     pub fn compact_journal(&mut self) -> Result<(), StoreError> {
-        let count: i64 = self.connection.query_row("SELECT COUNT(*) FROM change_journal", [], |row| row.get(0))?;
-        if count <= JOURNAL_HARD_LIMIT_COUNT { return Ok(()); }
-        let keep_from = count - JOURNAL_RETENTION_COUNT;
+        let count: i64 =
+            self.connection
+                .query_row("SELECT COUNT(*) FROM change_journal", [], |row| row.get(0))?;
+        if count <= JOURNAL_HARD_LIMIT_COUNT {
+            return Ok(());
+        }
+        let retained_minimum: i64 = self.connection.query_row(
+            "SELECT sequence FROM change_journal ORDER BY sequence DESC LIMIT 1 OFFSET ?1",
+            params![JOURNAL_RETENTION_COUNT - 1],
+            |row| row.get(0),
+        )?;
+        let deleted_through = retained_minimum.saturating_sub(1);
         let transaction = self.connection.transaction()?;
-        transaction.execute("DELETE FROM change_journal WHERE sequence <= ?1", params![keep_from])?;
-        transaction.execute("UPDATE sync_state SET min_valid_sequence = ?1", params![keep_from])?;
+        transaction.execute(
+            "DELETE FROM change_journal WHERE sequence <= ?1",
+            params![deleted_through],
+        )?;
+        transaction.execute(
+            "UPDATE sync_state SET min_valid_sequence = ?1",
+            params![deleted_through],
+        )?;
         transaction.commit()?;
         Ok(())
     }
@@ -315,19 +444,25 @@ impl StateStore {
 
     pub fn list_item_ids(&self, parent_id: Option<Uuid>) -> Result<Vec<Uuid>, StoreError> {
         let mut statement = self.connection.prepare("SELECT item_uuid FROM items WHERE parent_uuid IS ?1 AND tombstone = 0 ORDER BY remote_name COLLATE NOCASE, item_uuid")?;
-        let rows = statement.query_map(params![parent_id.map(|value| value.to_string())], |row| {
-            Uuid::parse_str(&row.get::<_, String>(0)?).map_err(|_| rusqlite::Error::InvalidQuery)
-        })?.collect::<Result<Vec<_>, _>>()?;
+        let rows = statement
+            .query_map(params![parent_id.map(|value| value.to_string())], |row| {
+                Uuid::parse_str(&row.get::<_, String>(0)?)
+                    .map_err(|_| rusqlite::Error::InvalidQuery)
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(rows)
     }
 }
 
 fn operation_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<OperationRecord> {
     Ok(OperationRecord {
-        operation_id: Uuid::parse_str(&row.get::<_, String>(0)?).map_err(|_| rusqlite::Error::InvalidQuery)?,
+        operation_id: Uuid::parse_str(&row.get::<_, String>(0)?)
+            .map_err(|_| rusqlite::Error::InvalidQuery)?,
         replay_key: row.get(1)?,
         kind: row.get(2)?,
-        item_id: row.get::<_, Option<String>>(3)?.and_then(|value| Uuid::parse_str(&value).ok()),
+        item_id: row
+            .get::<_, Option<String>>(3)?
+            .and_then(|value| Uuid::parse_str(&value).ok()),
         state: row.get(4)?,
         source_generation: row.get::<_, i64>(5)? as u64,
         cancel_requested: row.get::<_, i64>(6)? != 0,
@@ -368,7 +503,19 @@ mod tests {
     use cloudreve_protocol::CapabilitySnapshot;
 
     fn domain() -> DomainRecord {
-        DomainRecord { domain_id: Uuid::new_v4(), origin: "https://example.com".into(), account_id: "account".into(), display_name: "Test".into(), root_entity_id: "root".into(), root_uri: "/".into(), scope_key: "scope".into(), status: "healthy".into(), secret_ref: "credential-ref".into(), capability_revision: 1, capability_snapshot: CapabilitySnapshot::read_only_default() }
+        DomainRecord {
+            domain_id: Uuid::new_v4(),
+            origin: "https://example.com".into(),
+            account_id: "account".into(),
+            display_name: "Test".into(),
+            root_entity_id: "root".into(),
+            root_uri: "/".into(),
+            scope_key: "scope".into(),
+            status: "healthy".into(),
+            secret_ref: "credential-ref".into(),
+            capability_revision: 1,
+            capability_snapshot: CapabilitySnapshot::read_only_default(),
+        }
     }
 
     #[test]
@@ -376,8 +523,20 @@ mod tests {
         let store = StateStore::open_in_memory().unwrap();
         assert_eq!(store.schema_version().unwrap(), SCHEMA_VERSION);
         assert!(store.quick_check().unwrap());
-        for table in ["domains", "items", "change_journal", "signal_outbox", "operations", "upload_sessions", "conflicts"] {
-            assert!(store.connection.query_row::<i64, _, _>(&format!("SELECT COUNT(*) FROM {}", table), [], |row| row.get(0)).is_ok());
+        for table in [
+            "domains",
+            "items",
+            "change_journal",
+            "signal_outbox",
+            "operations",
+            "upload_sessions",
+            "conflicts",
+        ] {
+            assert!(store
+                .connection
+                .query_row::<i64, _, _>(&format!("SELECT COUNT(*) FROM {}", table), [], |row| row
+                    .get(0))
+                .is_ok());
         }
     }
 
@@ -387,11 +546,29 @@ mod tests {
         let domain = domain();
         store.insert_domain(&domain).unwrap();
         let item_id = Uuid::new_v4();
-        let entry = store.append_change(&ChangeRecord { item_id, old_parent_id: None, new_parent_id: None, kind: "created".into(), version: vec![1], origin: "remote".into(), provider_visible: true }).unwrap();
+        let entry = store
+            .append_change(&ChangeRecord {
+                item_id,
+                old_parent_id: None,
+                new_parent_id: None,
+                kind: "created".into(),
+                version: vec![1],
+                origin: "remote".into(),
+                provider_visible: true,
+            })
+            .unwrap();
         assert_eq!(entry.sequence, 1);
         assert_eq!(store.pending_outbox_count().unwrap(), 1);
-        let anchor = SyncAnchor { version: 1, domain_id: domain.domain_id, scope: "working_set".into(), epoch: entry.epoch, sequence: 0 };
-        let batch = store.enumerate_changes(&anchor, 50, anchor.domain_id, &anchor.scope).unwrap();
+        let anchor = SyncAnchor {
+            version: 1,
+            domain_id: domain.domain_id,
+            scope: "working_set".into(),
+            epoch: entry.epoch,
+            sequence: 0,
+        };
+        let batch = store
+            .enumerate_changes(&anchor, 50, anchor.domain_id, &anchor.scope)
+            .unwrap();
         assert_eq!(batch.changes.len(), 1);
         store.acknowledge_outbox(entry.sequence).unwrap();
         assert_eq!(store.pending_outbox_count().unwrap(), 0);
@@ -400,9 +577,22 @@ mod tests {
     #[test]
     fn replay_key_is_idempotent_and_cancel_is_persistent() {
         let mut store = StateStore::open_in_memory().unwrap();
-        let op = OperationRecord { operation_id: Uuid::new_v4(), replay_key: "template-1".into(), kind: "create".into(), item_id: None, state: "queued".into(), source_generation: 1, cancel_requested: false };
+        let op = OperationRecord {
+            operation_id: Uuid::new_v4(),
+            replay_key: "template-1".into(),
+            kind: "create".into(),
+            item_id: None,
+            state: "queued".into(),
+            source_generation: 1,
+            cancel_requested: false,
+        };
         let first = store.upsert_operation(&op).unwrap();
-        let second = store.upsert_operation(&OperationRecord { operation_id: Uuid::new_v4(), ..op.clone() }).unwrap();
+        let second = store
+            .upsert_operation(&OperationRecord {
+                operation_id: Uuid::new_v4(),
+                ..op.clone()
+            })
+            .unwrap();
         assert_eq!(first.operation_id, second.operation_id);
         store.request_cancel(first.operation_id).unwrap();
         let cancelled = store.upsert_operation(&op).unwrap();

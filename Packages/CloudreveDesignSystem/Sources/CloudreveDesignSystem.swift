@@ -1,6 +1,15 @@
 import SwiftUI
 import CloudreveDomainKit
 
+public struct TaskDisplay: Identifiable, Sendable {
+    public let id: UUID
+    public let title: String
+    public let progress: Double?
+    public let detail: String
+    public let state: String
+    public init(id: UUID, title: String, progress: Double?, detail: String, state: String) { self.id = id; self.title = title; self.progress = progress; self.detail = detail; self.state = state }
+}
+
 public enum CloudreveDesignTokens {
     public static let spacing4: CGFloat = 4
     public static let spacing8: CGFloat = 8
@@ -24,7 +33,10 @@ public struct TaskProgressRow: View {
     public let title: String
     public let progress: Double?
     public let detail: String
-    public init(title: String, progress: Double?, detail: String) { self.title = title; self.progress = progress; self.detail = detail }
+    public let state: String?
+    public let onCancel: (() -> Void)?
+    public let onRetry: (() -> Void)?
+    public init(title: String, progress: Double?, detail: String, state: String? = nil, onCancel: (() -> Void)? = nil, onRetry: (() -> Void)? = nil) { self.title = title; self.progress = progress; self.detail = detail; self.state = state; self.onCancel = onCancel; self.onRetry = onRetry }
     public var body: some View {
         VStack(alignment: .leading, spacing: CloudreveDesignTokens.spacing4) {
             HStack {
@@ -33,6 +45,13 @@ public struct TaskProgressRow: View {
                 Text(title).lineLimit(1)
                 Spacer(minLength: CloudreveDesignTokens.spacing8)
                 Text(detail).font(.caption).foregroundStyle(.secondary)
+                if let state, ["queued", "running", "retrying", "failed"].contains(state) {
+                    if ["retrying", "failed"].contains(state) {
+                        Button(action: { onRetry?() }) { Image(systemName: "arrow.clockwise") }.buttonStyle(.borderless).help("Retry")
+                    } else {
+                        Button(action: { onCancel?() }) { Image(systemName: "xmark.circle") }.buttonStyle(.borderless).help("Cancel")
+                    }
+                }
             }
             if let progress { ProgressView(value: progress).accessibilityValue(Text("\(Int(progress * 100))%")) } else { ProgressView().progressViewStyle(.linear) }
         }
@@ -42,15 +61,22 @@ public struct TaskProgressRow: View {
 
 public struct MenuBarPopoverView: View {
     public let domains: [DomainDescriptor]
-    public let tasks: [(String, Double?, String)]
-    public init(domains: [DomainDescriptor], tasks: [(String, Double?, String)] = []) { self.domains = domains; self.tasks = tasks }
+    public let tasks: [TaskDisplay]
+    public let recentTasks: [TaskDisplay]
+    public let hasActionableConflicts: Bool
+    public let onOpenSettings: () -> Void
+    public let onAddDomain: () -> Void
+    public let onOpenConflicts: () -> Void
+    public let onCancelTask: (UUID) -> Void
+    public let onRetryTask: (UUID) -> Void
+    public init(domains: [DomainDescriptor], tasks: [TaskDisplay] = [], recentTasks: [TaskDisplay] = [], hasActionableConflicts: Bool = false, onOpenSettings: @escaping () -> Void = {}, onAddDomain: @escaping () -> Void = {}, onOpenConflicts: @escaping () -> Void = {}, onCancelTask: @escaping (UUID) -> Void = { _ in }, onRetryTask: @escaping (UUID) -> Void = { _ in }) { self.domains = domains; self.tasks = tasks; self.recentTasks = recentTasks; self.hasActionableConflicts = hasActionableConflicts; self.onOpenSettings = onOpenSettings; self.onAddDomain = onAddDomain; self.onOpenConflicts = onOpenConflicts; self.onCancelTask = onCancelTask; self.onRetryTask = onRetryTask }
     public var body: some View {
         VStack(alignment: .leading, spacing: CloudreveDesignTokens.spacing12) {
             HStack {
 				Text("NimbusSync").font(.headline)
                 Spacer()
-                Button(action: {}) { Image(systemName: "gearshape") }.buttonStyle(.borderless).accessibilityLabel(Text("Settings"))
-                Button(action: {}) { Image(systemName: "plus") }.buttonStyle(.borderless).accessibilityLabel(Text("Add domain"))
+                Button(action: onOpenSettings) { Image(systemName: "gearshape") }.buttonStyle(.borderless).accessibilityLabel(Text("Settings"))
+                Button(action: onAddDomain) { Image(systemName: "plus") }.buttonStyle(.borderless).accessibilityLabel(Text("Add domain"))
             }
             if domains.isEmpty {
                 VStack(spacing: CloudreveDesignTokens.spacing8) {
@@ -68,7 +94,19 @@ public struct MenuBarPopoverView: View {
             if !tasks.isEmpty {
                 Divider()
                 Text("Active tasks").font(.subheadline)
-                ForEach(Array(tasks.enumerated()), id: \.offset) { _, task in TaskProgressRow(title: task.0, progress: task.1, detail: task.2) }
+                ForEach(tasks) { task in
+                    TaskProgressRow(title: task.title, progress: task.progress, detail: task.detail, state: task.state, onCancel: { onCancelTask(task.id) }, onRetry: { onRetryTask(task.id) })
+                }
+            }
+            if !recentTasks.isEmpty {
+                Divider()
+                Text("Recent").font(.subheadline)
+                ForEach(recentTasks) { task in
+                    TaskProgressRow(title: task.title, progress: task.progress, detail: task.detail, state: task.state, onCancel: { onCancelTask(task.id) }, onRetry: { onRetryTask(task.id) })
+                }
+            }
+            if hasActionableConflicts {
+                Button(action: onOpenConflicts) { Label("Review conflicts", systemImage: "exclamationmark.triangle") }.buttonStyle(.bordered)
             }
         }
         .padding(CloudreveDesignTokens.spacing16)

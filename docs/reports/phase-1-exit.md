@@ -22,13 +22,16 @@ Phase 1 的本地 Store/Auth/Domain/read-path 工程基础已实现并通过本�
 8. refresh token 进入 Keychain vault；跨进程 advisory lock、generation、unknown outcome 和 PKCE state/challenge 已有实现。
 9. 远端只读 backend 使用 URLSession，Bearer 不跟随跨 origin redirect，signed URL 下载不携带 Cloudreve Bearer。
 10. 10,000 条目录数据的分页测试通过，单页限制为不超过 500 条。
+11. 补齐正式 OAuth/PKCE browser session、token exchange、`/api/v4/site/ping` 版本门禁、账号/根实体二次校验和跨 origin redirect 保护。
+12. Store schema 升至 v6：迁移可从 preparing 状态恢复，Domain/item 权限、Cloudreve 创建/修改时间、trash 原父级、冲突远端版本、Domain 图标、provisioning secret reference 和 task history visibility 落盘，repair 会连同 WAL/SHM/journal sidecar 一并隔离；旧 schema additive migration 会提升 generation 并保持 fencing。
+13. App Group Domain store 与 registry store 分离接线；菜单栏 Product projection 从持久 operations/conflicts 读取，而不是使用空内存列表。
 
 ## 3. 验证结果
 
 | 验证 | 结果 |
 |---|---|
-| Rust workspace tests | 通过，11 core + 7 protocol + 3 store tests |
-| Swift Package tests | 通过，13 tests；包含 10,000 item page benchmark |
+| Rust workspace tests | 通过，12 core + 10 protocol + 3 store tests |
+| Swift Package tests | 通过，41 tests；包含 10,000 item page benchmark |
 | Xcode Debug build | 通过，CloudreveMac、FileProvider、FileProviderUI 及 Swift packages |
 | Secret/release static scan | 通过 |
 | App Group/Keychain real entitlement | 未验证，当前构建为 `CODE_SIGNING_ALLOWED=NO` |
@@ -41,4 +44,4 @@ Phase 1 的本地 Store/Auth/Domain/read-path 工程基础已实现并通过本�
 - `StoreFileProviderBackend` 对未接入的远端写路径 fail closed。
 - Remote backend 的缓存回退只使用完整 snapshot，不把半页作为完整目录。
 - App Group、Keychain、真实 Cloudreve 和 Finder evidence 需要在 Phase 1/2 对应环境任务中补齐，不能通过静态报告伪造通过。
-
+- 当前 Swift StoreBridge/RemoteBackend 是产品读路径事实实现；Rust Store/Core 仍是并行可测试实现，尚未通过完整 FFI 接入 App/Extension。该边界必须在 Rust 接入或架构基线调整后才能关闭。

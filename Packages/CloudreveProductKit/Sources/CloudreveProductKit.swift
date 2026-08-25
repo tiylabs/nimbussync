@@ -26,6 +26,13 @@ public struct ProductTask: Identifiable, Codable, Equatable, Sendable {
     public var progress: Double? { guard let totalBytes, totalBytes > 0 else { return nil }; return min(1, max(0, Double(processedBytes) / Double(totalBytes))) }
 }
 
+public struct ProductTaskProjection: Sendable {
+    public let tasks: [ProductTask]
+    public init(tasks: [ProductTask]) { self.tasks = tasks }
+    public var active: [ProductTask] { tasks.filter { [.queued, .running, .retrying].contains($0.state) } }
+    public var recent: [ProductTask] { Array(tasks.sorted { $0.updatedAt > $1.updatedAt }.prefix(20)) }
+}
+
 public struct TaskProjection: Sendable {
     private var values: [UUID: ProductTask] = [:]
     public init() {}
@@ -45,9 +52,10 @@ public struct ProductConflict: Identifiable, Codable, Equatable, Sendable {
     public let baseSummary: String
     public let localSummary: String
     public let remoteSummary: String
+    public let remoteVersion: Data?
     public let createdAt: Date
     public var state: String
-    public init(id: UUID, domainIdentifier: String, itemIdentifier: String, filename: String, kind: String, baseSummary: String, localSummary: String, remoteSummary: String, createdAt: Date, state: String = "pending") { self.id = id; self.domainIdentifier = domainIdentifier; self.itemIdentifier = itemIdentifier; self.filename = filename; self.kind = kind; self.baseSummary = baseSummary; self.localSummary = localSummary; self.remoteSummary = remoteSummary; self.createdAt = createdAt; self.state = state }
+    public init(id: UUID, domainIdentifier: String, itemIdentifier: String, filename: String, kind: String, baseSummary: String, localSummary: String, remoteSummary: String, remoteVersion: Data? = nil, createdAt: Date, state: String = "pending") { self.id = id; self.domainIdentifier = domainIdentifier; self.itemIdentifier = itemIdentifier; self.filename = filename; self.kind = kind; self.baseSummary = baseSummary; self.localSummary = localSummary; self.remoteSummary = remoteSummary; self.remoteVersion = remoteVersion; self.createdAt = createdAt; self.state = state }
 }
 
 public struct ConflictCenterModel: Sendable {
@@ -70,6 +78,7 @@ public struct ProductSnapshot: Equatable, Sendable {
     }
     public var activeTasks: [ProductTask] { tasks.filter { [.queued, .running, .retrying].contains($0.state) } }
     public var actionableConflicts: [ProductConflict] { conflicts.filter { $0.state == "pending" } }
+    public var taskProjection: ProductTaskProjection { ProductTaskProjection(tasks: tasks) }
 }
 
 public struct NotificationPreferences: Codable, Equatable, Sendable {
@@ -87,28 +96,97 @@ public enum ProductCopy {
 
 public actor ProductStore {
     private let registry: SQLiteStateStore?
+    private let storeFactory: AppGroupStoreFactory?
     private let userDefaults: UserDefaults
     private let metrics: MetricsStore
     private let notificationKey = "nimbussync.notification.preferences"
 
-    public init(registry: SQLiteStateStore? = nil, userDefaults: UserDefaults = .standard, metrics: MetricsStore = MetricsStore()) { self.registry = registry; self.userDefaults = userDefaults; self.metrics = metrics }
+    public init(registry: SQLiteStateStore? = nil, storeFactory: AppGroupStoreFactory? = nil, userDefaults: UserDefaults = .standard, metrics: MetricsStore = MetricsStore()) { self.registry = registry; self.storeFactory = storeFactory; self.userDefaults = userDefaults; self.metrics = metrics }
 
     public func snapshot() -> ProductSnapshot {
         let domains = (try? registry?.allDomains() ?? [])?.compactMap { stored -> DomainDescriptor? in
             guard let scope = try? RemoteScope(origin: stored.origin, accountID: stored.accountID, rootURI: stored.rootURI) else { return nil }
-            var descriptor = DomainDescriptor(displayName: stored.displayName, scope: scope, rootRemoteID: stored.rootRemoteID, accountID: stored.accountID, secretReference: stored.secretReference, capabilitySnapshot: stored.capabilitySnapshot)
+            var descriptor = DomainDescriptor(displayName: stored.displayName, scope: scope, rootRemoteID: stored.rootRemoteID, accountID: stored.accountID, secretReference: stored.secretReference, capabilitySnapshot: stored.capabilitySnapshot, iconURL: stored.iconURL)
             descriptor.status = stored.status
             return descriptor
         } ?? []
+        var tasks: [ProductTask] = []
+        var conflicts: [ProductConflict] = []
+        for domain in domains {
+            let domainStore: SQLiteStateStore?
+            if let storeFactory { domainStore = try? storeFactory.domainStore(identifier: domain.identifier) } else { domainStore = nil }
+            let storedOperations = (try? domainStore?.operations(limit: 100) ?? []) ?? []
+            tasks.append(contentsOf: storedOperations.map { stored in
+                let errorCode: String?
+                switch stored.operation.state {
+                case "unknown_outcome": errorCode = "unknown_outcome"
+                case "conflict": errorCode = "version_conflict"
+                case "auth_expired": errorCode = "authentication_required"
+                default: errorCode = nil
+                }
+                return ProductTask(id: stored.operation.operationID, domainIdentifier: domain.identifier, itemIdentifier: stored.operation.itemIdentifier, title: stored.operation.itemIdentifier ?? stored.operation.kind, direction: direction(for: stored.operation.kind), state: taskState(for: stored.operation.state, cancelRequested: stored.operation.cancelRequested), errorCode: errorCode, updatedAt: stored.updatedAt)
+            })
+            let storedConflicts: [ConflictProjection]
+            if let domainStore { storedConflicts = (try? domainStore.pendingConflicts(limit: 100)) ?? [] } else { storedConflicts = [] }
+            conflicts.append(contentsOf: storedConflicts.map { conflict in
+                let filename = (try? domainStore?.item(identifier: conflict.itemIdentifier)?.name) ?? conflict.itemIdentifier
+                return ProductConflict(id: conflict.conflictID, domainIdentifier: domain.identifier, itemIdentifier: conflict.itemIdentifier, filename: filename, kind: conflict.kind, baseSummary: conflict.baseSummary, localSummary: conflict.localSummary, remoteSummary: conflict.remoteSummary, remoteVersion: conflict.remoteVersion, createdAt: conflict.createdAt, state: conflict.state)
+            })
+        }
         let preferences = userDefaults.data(forKey: notificationKey).flatMap { try? JSONDecoder().decode(NotificationPreferences.self, from: $0) } ?? NotificationPreferences()
-        return ProductSnapshot(domains: domains, metrics: metrics.snapshot(), notificationPreferences: preferences)
+        return ProductSnapshot(domains: domains, tasks: tasks, conflicts: conflicts, metrics: metrics.snapshot(), notificationPreferences: preferences)
     }
 
     public func saveNotificationPreferences(_ preferences: NotificationPreferences) throws {
         userDefaults.set(try JSONEncoder().encode(preferences), forKey: notificationKey)
     }
 
+    public func cancelTask(_ taskID: UUID) throws {
+        guard let registry, let storeFactory else { return }
+        for domain in try registry.allDomains() {
+            guard let store = try? storeFactory.domainStore(identifier: domain.identifier) else { continue }
+            if try store.operation(operationID: taskID) != nil {
+                try store.requestCancel(operationID: taskID)
+                return
+            }
+        }
+    }
+
+    public func retryTask(_ taskID: UUID) throws {
+        guard let registry, let storeFactory else { return }
+        for domain in try registry.allDomains() {
+            guard let store = try? storeFactory.domainStore(identifier: domain.identifier) else { continue }
+            if try store.operation(operationID: taskID) != nil {
+                try store.retryOperation(operationID: taskID)
+                return
+            }
+        }
+    }
+
+    public func clearTaskHistory() throws {
+        guard let registry, let storeFactory else { return }
+        for domain in try registry.allDomains() {
+            try storeFactory.domainStore(identifier: domain.identifier).clearCompletedOperations()
+        }
+    }
+
     public func store() -> SQLiteStateStore? { registry }
+}
+
+private func direction(for kind: String) -> ProductTaskDirection {
+    switch kind.lowercased() { case "create", "modify", "rename", "move", "trash", "restore", "delete": return .upload; default: return .other }
+}
+
+private func taskState(for state: String, cancelRequested: Bool = false) -> ProductTaskState {
+    if cancelRequested && !["committed", "cancelled", "permanently_failed"].contains(state) { return .cancelled }
+    switch state {
+    case "queued": return .queued
+    case "committed": return .succeeded
+    case "cancelled": return .cancelled
+    case "retry_wait": return .retrying
+    case "permanently_failed", "conflict", "unknown_outcome", "auth_expired": return .failed
+    default: return .running
+    }
 }
 
 public actor NotificationCoordinator {
@@ -139,23 +217,37 @@ public actor NotificationCoordinator {
         let key = "\(kind):\(opaqueID)"
         guard !sent.contains(key) else { return }
         let content = UNMutableNotificationContent(); content.title = title; content.body = body; content.categoryIdentifier = kind; content.sound = .default
+        let action = kind == "auth" ? "reauthorize" : (kind == "failure" ? "task" : kind)
+        content.userInfo = ["deepLink": "nimbussync-macos://\(action)/\(opaqueID)"]
         let request = UNNotificationRequest(identifier: key, content: content, trigger: nil)
         try await center.add(request)
         sent.append(key); userDefaults.set(Array(sent.suffix(500)), forKey: dedupeKey)
     }
 }
 
-public enum DeepLinkDestination: Equatable, Sendable { case conflict(UUID), reauthorize(String), task(UUID), settings }
+public enum DeepLinkDestination: Equatable, Sendable { case conflict(UUID), reauthorize(String), task(UUID), item(String), conflictItem(String), settings }
 
 public enum DeepLinkRouter {
     public static func destination(url: URL) -> DeepLinkDestination? {
-        guard url.scheme == "nimbussync-macos" else { return nil }
-        let components = url.pathComponents.filter { $0 != "/" }
-        guard let action = components.first else { return .settings }
+        guard url.scheme == "nimbussync-macos", url.user == nil, url.password == nil, url.query == nil, url.fragment == nil else { return nil }
+        let pathComponents = url.pathComponents.filter { $0 != "/" }
+        let action: String
+        let identifiers: ArraySlice<String>
+        if let host = url.host, !host.isEmpty {
+            action = host
+            identifiers = pathComponents[...]
+        } else if let first = pathComponents.first {
+            action = first
+            identifiers = pathComponents.dropFirst()
+        } else {
+            return .settings
+        }
         switch action {
-        case "conflict": guard let id = components.dropFirst().first.flatMap(UUID.init(uuidString:)) else { return nil }; return .conflict(id)
-        case "reauthorize": guard let id = components.dropFirst().first, CloudreveIdentifier.validate(id, prefix: CloudreveIdentifier.domainPrefix) else { return nil }; return .reauthorize(id)
-        case "task": guard let id = components.dropFirst().first.flatMap(UUID.init(uuidString:)) else { return nil }; return .task(id)
+        case "conflict": guard let id = identifiers.first.flatMap(UUID.init(uuidString:)), identifiers.count == 1 else { return nil }; return .conflict(id)
+        case "reauthorize": guard let id = identifiers.first, identifiers.count == 1, CloudreveIdentifier.validate(id, prefix: CloudreveIdentifier.domainPrefix) else { return nil }; return .reauthorize(id)
+        case "task": guard let id = identifiers.first.flatMap(UUID.init(uuidString:)), identifiers.count == 1 else { return nil }; return .task(id)
+        case "item": guard let id = identifiers.first, identifiers.count == 1, CloudreveIdentifier.validate(id, prefix: CloudreveIdentifier.itemPrefix) else { return nil }; return .item(id)
+        case "conflict-item": guard let id = identifiers.first, identifiers.count == 1, CloudreveIdentifier.validate(id, prefix: CloudreveIdentifier.itemPrefix) else { return nil }; return .conflictItem(id)
         case "settings": return .settings
         default: return nil
         }
@@ -184,6 +276,15 @@ public struct ExclusionRuleSet: Codable, Equatable, Sendable {
 
 public struct ExclusionImpact: Equatable, Sendable { public let remoteMatches: Int; public let dirtyMatches: Int; public init(remoteMatches: Int, dirtyMatches: Int) { self.remoteMatches = remoteMatches; self.dirtyMatches = dirtyMatches } }
 
+private func relativePath(_ uri: String, rootURI: String) -> String? {
+    if uri.hasPrefix("cloudreve://") || rootURI.hasPrefix("cloudreve://") { return CloudreveRemoteURI.relativePath(uri, root: rootURI) }
+    let normalizedURI = uri.replacingOccurrences(of: "\\", with: "/").trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    let normalizedRoot = rootURI.replacingOccurrences(of: "\\", with: "/").trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    guard normalizedRoot.isEmpty || normalizedURI == normalizedRoot || normalizedURI.hasPrefix(normalizedRoot + "/") else { return nil }
+    if normalizedRoot.isEmpty { return normalizedURI }
+    return String(normalizedURI.dropFirst(normalizedRoot.count).trimmingCharacters(in: CharacterSet(charactersIn: "/")))
+}
+
 public actor ExclusionRuleService {
     private let store: SQLiteStateStore
     public init(store: SQLiteStateStore) { self.store = store }
@@ -194,7 +295,13 @@ public actor ExclusionRuleService {
         }
         return try ExclusionRuleSet(revision: revision, rules: rules)
     }
-    public func preview(_ ruleSet: ExclusionRuleSet, items: [RemoteItem]) -> ExclusionImpact { let matches = items.filter { ruleSet.matches(relativePath: $0.uri) }; return ExclusionImpact(remoteMatches: matches.count, dirtyMatches: matches.filter { $0.tombstone == false && !$0.trashed }.count) }
+    public func preview(_ ruleSet: ExclusionRuleSet, items: [RemoteItem], rootURI: String = "/") -> ExclusionImpact {
+        let matches = items.filter { item in
+            guard let relativePath = relativePath(item.uri, rootURI: rootURI) else { return false }
+            return ruleSet.matches(relativePath: relativePath)
+        }
+        return ExclusionImpact(remoteMatches: matches.count, dirtyMatches: matches.filter { !$0.tombstone && !$0.trashed }.count)
+    }
     public func persist(_ ruleSet: ExclusionRuleSet, domainIdentifier: String) throws { let data = try JSONEncoder().encode(ruleSet); try store.setPreference(key: "exclusion.rules.\(domainIdentifier)", value: String(data: data, encoding: .utf8) ?? "") }
 }
 
@@ -209,7 +316,7 @@ public actor ExclusionApplicationService {
     private let rules: ExclusionRuleService
     private let store: SQLiteStateStore
     public init(store: SQLiteStateStore) { self.store = store; self.rules = ExclusionRuleService(store: store) }
-    public func preview(revision: UInt64, text: String, items: [RemoteItem]) async throws -> ExclusionApplication { let ruleSet = try await rules.compile(revision: revision, text: text); let impact = await rules.preview(ruleSet, items: items); return ExclusionApplication(ruleSet: ruleSet, impact: impact) }
+    public func preview(revision: UInt64, text: String, items: [RemoteItem], rootURI: String = "/") async throws -> ExclusionApplication { let ruleSet = try await rules.compile(revision: revision, text: text); let impact = await rules.preview(ruleSet, items: items, rootURI: rootURI); return ExclusionApplication(ruleSet: ruleSet, impact: impact) }
     public func apply(_ application: ExclusionApplication, domainIdentifier: String, preserveDirty: Bool) async throws {
         guard !application.requiresDirtyPreservation || preserveDirty else { throw CoreFailure(code: .cannotSynchronize, retryable: false, userActionRequired: true) }
         try await rules.persist(application.ruleSet, domainIdentifier: domainIdentifier)
@@ -256,8 +363,8 @@ public struct ReleaseManifest: Codable, Equatable, Sendable {
 }
 
 public enum UpgradeFence {
-    public static func canWrite(schemaVersion: Int, compatibilityMinimum: Int, compatibilityMaximum: Int, processGeneration: Int, currentGeneration: Int) -> Bool {
-        schemaVersion >= compatibilityMinimum && schemaVersion <= compatibilityMaximum && processGeneration == currentGeneration
+    public static func canWrite(schemaVersion: Int, compatibilityMinimum: Int, compatibilityMaximum: Int, processGeneration: Int, currentGeneration: Int, migrationState: String = "ready") -> Bool {
+        migrationState == "ready" && schemaVersion >= compatibilityMinimum && schemaVersion <= compatibilityMaximum && processGeneration == currentGeneration
     }
 }
 

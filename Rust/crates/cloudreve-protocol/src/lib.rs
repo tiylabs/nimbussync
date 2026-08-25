@@ -24,9 +24,25 @@ pub struct ApiEnvelope<T> {
 impl<T> ApiEnvelope<T> {
     pub fn into_result(self) -> Result<T, ApiError> {
         if self.code != 0 {
-            return Err(ApiError { code: self.code, message: self.msg });
+            return Err(ApiError {
+                code: self.code,
+                message: self.msg,
+            });
         }
-        self.data.ok_or_else(|| ApiError { code: -1, message: "successful response did not include data".into() })
+        self.data.ok_or_else(|| ApiError {
+            code: -1,
+            message: "successful response did not include data".into(),
+        })
+    }
+
+    pub fn into_unit(self) -> Result<(), ApiError> {
+        if self.code != 0 {
+            return Err(ApiError {
+                code: self.code,
+                message: self.msg,
+            });
+        }
+        Ok(())
     }
 }
 
@@ -174,7 +190,7 @@ pub struct EntityUrlDto {
 pub struct FileEventDto {
     #[serde(rename = "type")]
     pub event_type: String,
-    #[serde(default)]
+    #[serde(default, alias = "file_id")]
     pub id: Option<String>,
     #[serde(default)]
     pub from: String,
@@ -195,22 +211,54 @@ pub enum ServerEvent {
 impl RemoteFileDto {
     pub fn to_remote_item(&self, parent_id: Option<String>) -> RemoteItem {
         let is_folder = self.file_type == 1;
-        let content_version = self.primary_entity.clone().unwrap_or_else(|| self.updated_at.clone());
+        let can_read = self
+            .permission
+            .as_deref()
+            .map(|value| value.contains('r'))
+            .unwrap_or(true);
+        let can_write = self
+            .capability
+            .as_deref()
+            .map(|value| value.contains('w'))
+            .unwrap_or(false)
+            && can_read;
+        let content_version = self
+            .primary_entity
+            .clone()
+            .unwrap_or_else(|| self.updated_at.clone());
         RemoteItem {
             id: self.id.clone(),
             parent_id,
             uri: self.path.clone(),
             name: self.name.clone(),
-            kind: if is_folder { RemoteItemKind::Folder } else { RemoteItemKind::File },
+            kind: if is_folder {
+                RemoteItemKind::Folder
+            } else {
+                RemoteItemKind::File
+            },
             size: self.size.max(0) as u64,
             content_etag: Some(content_version),
             metadata_revision: Some(self.updated_at.clone()),
-            content_type: if is_folder { "public.folder".into() } else { "public.data".into() },
-            can_read: self.permission.as_deref().map(|value| !value.is_empty()).unwrap_or(true),
-            can_write: self.capability.as_deref().map(|value| value.contains('w')).unwrap_or(false),
-            can_add_children: is_folder,
-            can_trash: true,
-            can_delete: true,
+            content_type: if is_folder {
+                "public.folder".into()
+            } else {
+                "public.data".into()
+            },
+            can_read,
+            can_write,
+            can_add_children: is_folder && can_write,
+            can_trash: can_read
+                && self
+                    .capability
+                    .as_deref()
+                    .map(|value| value.contains('d'))
+                    .unwrap_or(false),
+            can_delete: can_read
+                && self
+                    .capability
+                    .as_deref()
+                    .map(|value| value.contains('d'))
+                    .unwrap_or(false),
             trashed: false,
         }
     }
@@ -298,7 +346,9 @@ impl CapabilitySnapshot {
     }
 
     pub fn provider(&self, name: &str) -> Option<&ProviderCapability> {
-        self.providers.iter().find(|provider| provider.provider == name)
+        self.providers
+            .iter()
+            .find(|provider| provider.provider == name)
     }
 }
 
@@ -322,13 +372,20 @@ pub enum ProtocolError {
 
 pub fn normalize_origin(origin: &str, allow_loopback_http: bool) -> Result<String, ProtocolError> {
     let trimmed = origin.trim();
-    let mut url = Url::parse(trimmed).map_err(|error| ProtocolError::InvalidOrigin(error.to_string()))?;
+    let mut url =
+        Url::parse(trimmed).map_err(|error| ProtocolError::InvalidOrigin(error.to_string()))?;
     let is_loopback = matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "::1"));
     if url.scheme() != "https" && !(allow_loopback_http && url.scheme() == "http" && is_loopback) {
         return Err(ProtocolError::InsecureOrigin);
     }
-    if url.username() != "" || url.password().is_some() || url.query().is_some() || url.fragment().is_some() {
-        return Err(ProtocolError::InvalidOrigin("credentials, query and fragment are not allowed".into()));
+    if url.username() != ""
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
+        return Err(ProtocolError::InvalidOrigin(
+            "credentials, query and fragment are not allowed".into(),
+        ));
     }
     url.set_query(None);
     url.set_fragment(None);
@@ -337,9 +394,29 @@ pub fn normalize_origin(origin: &str, allow_loopback_http: bool) -> Result<Strin
     Ok(url.to_string().trim_end_matches('/').to_string())
 }
 
-pub fn canonical_scope(origin: &str, account_id: &str, remote_uri: &str) -> Result<String, ProtocolError> {
+pub fn canonical_scope(
+    origin: &str,
+    account_id: &str,
+    remote_uri: &str,
+) -> Result<String, ProtocolError> {
     let origin = normalize_origin(origin, false)?;
-    let mut path = remote_uri.trim().replace('\\', "/");
+    if account_id.is_empty() || account_id.contains('\0') {
+        return Err(ProtocolError::InvalidScope);
+    }
+    let mut path = if remote_uri.trim_start().starts_with("cloudreve://") {
+        let parsed = Url::parse(remote_uri.trim()).map_err(|_| ProtocolError::InvalidScope)?;
+        if parsed.host_str() != Some("my")
+            || parsed.username() != account_id
+            || parsed.password().is_some()
+            || parsed.query().is_some()
+            || parsed.fragment().is_some()
+        {
+            return Err(ProtocolError::InvalidScope);
+        }
+        parsed.path().to_owned()
+    } else {
+        remote_uri.trim().replace('\\', "/")
+    };
     if !path.starts_with('/') {
         path.insert(0, '/');
     }
@@ -363,11 +440,20 @@ pub fn scopes_overlap(left: &str, right: &str) -> bool {
     if left.len() != 3 || right.len() != 3 || left[0] != right[0] || left[1] != right[1] {
         return false;
     }
-    let left_path = left[2].trim_end_matches('/');
-    let right_path = right[2].trim_end_matches('/');
-    left_path == right_path
-        || left_path.starts_with(&(right_path.to_string() + "/"))
-        || right_path.starts_with(&(left_path.to_string() + "/"))
+    let left_path = if left[2] == "/" {
+        "/"
+    } else {
+        left[2].trim_end_matches('/')
+    };
+    let right_path = if right[2] == "/" {
+        "/"
+    } else {
+        right[2].trim_end_matches('/')
+    };
+    fn contains(parent: &str, child: &str) -> bool {
+        parent == "/" || parent == child || child.starts_with(&(parent.to_string() + "/"))
+    }
+    contains(left_path, right_path) || contains(right_path, left_path)
 }
 
 pub fn validate_local_identifier(value: &str, prefix: &str) -> Result<(), ProtocolError> {
@@ -417,7 +503,9 @@ pub struct PageToken {
 impl PageToken {
     pub fn encode(&self) -> Result<Vec<u8>, ProtocolError> {
         let json = serde_json::to_vec(self).map_err(|_| ProtocolError::ValueTooLarge)?;
-        let encoded = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(json).into_bytes();
+        let encoded = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .encode(json)
+            .into_bytes();
         if encoded.len() > 500 {
             return Err(ProtocolError::ValueTooLarge);
         }
@@ -444,7 +532,13 @@ pub struct SyncAnchor {
 impl SyncAnchor {
     pub fn encode(&self) -> Result<Vec<u8>, ProtocolError> {
         let json = serde_json::to_vec(self).map_err(|_| ProtocolError::ValueTooLarge)?;
-        Ok(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(json).into_bytes())
+        let encoded = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .encode(json)
+            .into_bytes();
+        if encoded.len() > 500 {
+            return Err(ProtocolError::ValueTooLarge);
+        }
+        Ok(encoded)
     }
 
     pub fn decode(value: &[u8]) -> Result<Self, ProtocolError> {
@@ -454,8 +548,18 @@ impl SyncAnchor {
         serde_json::from_slice(&json).map_err(|_| ProtocolError::AnchorMismatch)
     }
 
-    pub fn validate(&self, domain_id: Uuid, scope: &str, epoch: Uuid, min_sequence: u64) -> Result<(), ProtocolError> {
-        if self.domain_id != domain_id || self.scope != scope || self.epoch != epoch || self.sequence < min_sequence {
+    pub fn validate(
+        &self,
+        domain_id: Uuid,
+        scope: &str,
+        epoch: Uuid,
+        min_sequence: u64,
+    ) -> Result<(), ProtocolError> {
+        if self.domain_id != domain_id
+            || self.scope != scope
+            || self.epoch != epoch
+            || self.sequence < min_sequence
+        {
             return Err(ProtocolError::AnchorMismatch);
         }
         Ok(())
@@ -473,6 +577,8 @@ pub struct SseEvent {
 pub enum SseError {
     #[error("frame exceeds {0} bytes")]
     FrameTooLarge(usize),
+    #[error("SSE frame is not valid UTF-8")]
+    InvalidUtf8,
 }
 
 /// A strict SSE parser supporting CRLF, LF, comments, multi-line data and
@@ -480,6 +586,7 @@ pub enum SseError {
 #[derive(Debug, Clone)]
 pub struct SseParser {
     buffer: Vec<u8>,
+    frame_bytes: usize,
     event: Option<String>,
     id: Option<String>,
     data: Vec<String>,
@@ -494,69 +601,100 @@ impl Default for SseParser {
 
 impl SseParser {
     pub fn new(max_frame_bytes: usize) -> Self {
-        Self { buffer: Vec::new(), event: None, id: None, data: Vec::new(), max_frame_bytes }
+        Self {
+            buffer: Vec::new(),
+            frame_bytes: 0,
+            event: None,
+            id: None,
+            data: Vec::new(),
+            max_frame_bytes,
+        }
     }
 
     pub fn push(&mut self, bytes: &[u8]) -> Result<Vec<SseEvent>, SseError> {
         self.buffer.extend_from_slice(bytes);
-        if self.buffer.len() > self.max_frame_bytes {
-            return Err(SseError::FrameTooLarge(self.max_frame_bytes));
-        }
         let mut events = Vec::new();
         while let Some(position) = find_line_end(&self.buffer) {
             let mut line = self.buffer.drain(..position).collect::<Vec<_>>();
-            let newline_len = if self.buffer.first() == Some(&b'\r') && self.buffer.get(1) == Some(&b'\n') { 2 } else { 1 };
+            let newline_len =
+                if self.buffer.first() == Some(&b'\r') && self.buffer.get(1) == Some(&b'\n') {
+                    2
+                } else {
+                    1
+                };
             self.buffer.drain(..newline_len);
-            if line.last() == Some(&b'\r') { line.pop(); }
-            self.consume_line(&line, &mut events);
-            if self.buffer.len() > self.max_frame_bytes { return Err(SseError::FrameTooLarge(self.max_frame_bytes)); }
+            self.frame_bytes = self.frame_bytes.saturating_add(position + newline_len);
+            if self.frame_bytes > self.max_frame_bytes {
+                return Err(SseError::FrameTooLarge(self.max_frame_bytes));
+            }
+            if line.last() == Some(&b'\r') {
+                line.pop();
+            }
+            self.consume_line(&line, &mut events)?;
+        }
+        if self.frame_bytes.saturating_add(self.buffer.len()) > self.max_frame_bytes {
+            return Err(SseError::FrameTooLarge(self.max_frame_bytes));
         }
         Ok(events)
     }
 
-    pub fn finish(&mut self) -> Vec<SseEvent> {
+    pub fn finish(&mut self) -> Result<Vec<SseEvent>, SseError> {
         let mut events = Vec::new();
         if !self.buffer.is_empty() {
             let line = std::mem::take(&mut self.buffer);
-            self.consume_line(&line, &mut events);
+            self.consume_line(&line, &mut events)?;
         }
         self.flush_event(&mut events);
-        events
+        Ok(events)
     }
 
-    fn consume_line(&mut self, line: &[u8], events: &mut Vec<SseEvent>) {
+    fn consume_line(&mut self, line: &[u8], events: &mut Vec<SseEvent>) -> Result<(), SseError> {
         if line.is_empty() {
             self.flush_event(events);
-            return;
+            return Ok(());
         }
-        if line[0] == b':' { return; }
-        let text = String::from_utf8_lossy(line);
-        let (field, value) = text.split_once(':').map_or((text.as_ref(), ""), |(field, value)| {
-            (field, value.strip_prefix(' ').unwrap_or(value))
-        });
+        if line[0] == b':' {
+            return Ok(());
+        }
+        let text = std::str::from_utf8(line).map_err(|_| SseError::InvalidUtf8)?;
+        let (field, value) = text
+            .split_once(':')
+            .map_or((text.as_ref(), ""), |(field, value)| {
+                (field, value.strip_prefix(' ').unwrap_or(value))
+            });
         match field {
             "event" => self.event = Some(value.to_owned()),
             "data" => self.data.push(value.to_owned()),
             "id" => self.id = Some(value.to_owned()),
             _ => {}
         }
+        Ok(())
     }
 
     fn flush_event(&mut self, events: &mut Vec<SseEvent>) {
         if self.event.is_some() || self.id.is_some() || !self.data.is_empty() {
-            events.push(SseEvent { event: self.event.take(), id: self.id.take(), data: self.data.join("\n") });
+            events.push(SseEvent {
+                event: self.event.take(),
+                id: self.id.take(),
+                data: self.data.join("\n"),
+            });
         }
         self.data.clear();
+        self.frame_bytes = 0;
     }
 }
 
 fn find_line_end(buffer: &[u8]) -> Option<usize> {
     for (index, byte) in buffer.iter().enumerate() {
-        if *byte == b'\n' { return Some(index); }
+        if *byte == b'\n' {
+            return Some(index);
+        }
         if *byte == b'\r' {
             // A trailing CR may be the first half of a CRLF split across
             // network chunks, so wait for the next byte before framing it.
-            if index + 1 == buffer.len() { return None; }
+            if index + 1 == buffer.len() {
+                return None;
+            }
             return Some(index);
         }
     }
@@ -570,13 +708,24 @@ pub struct Backoff {
 }
 
 impl Backoff {
-    pub fn new(max_delay_ms: u64) -> Self { Self { attempt: 0, max_delay_ms } }
-    pub fn reset(&mut self) { self.attempt = 0; }
+    pub fn new(max_delay_ms: u64) -> Self {
+        Self {
+            attempt: 0,
+            max_delay_ms,
+        }
+    }
+    pub fn reset(&mut self) {
+        self.attempt = 0;
+    }
     pub fn next_delay_ms(&mut self, jitter_ms: u64) -> u64 {
         let exponential = 1_000u64.saturating_mul(2u64.saturating_pow(self.attempt.min(16)));
         self.attempt = self.attempt.saturating_add(1);
         let capped = exponential.min(self.max_delay_ms);
-        let jitter = if jitter_ms == 0 { 0 } else { jitter_ms % capped.max(1) };
+        let jitter = if jitter_ms == 0 {
+            0
+        } else {
+            jitter_ms % capped.max(1)
+        };
         (capped / 2).saturating_add(jitter.min(capped / 2))
     }
 }
@@ -588,13 +737,24 @@ pub struct BoundedQueue<T> {
 }
 
 impl<T> BoundedQueue<T> {
-    pub fn new(capacity: usize) -> Self { Self { values: VecDeque::new(), capacity: capacity.max(1) } }
+    pub fn new(capacity: usize) -> Self {
+        Self {
+            values: VecDeque::new(),
+            capacity: capacity.max(1),
+        }
+    }
     pub fn push(&mut self, value: T) {
-        if self.values.len() >= self.capacity { self.values.pop_front(); }
+        if self.values.len() >= self.capacity {
+            self.values.pop_front();
+        }
         self.values.push_back(value);
     }
-    pub fn len(&self) -> usize { self.values.len() }
-    pub fn iter(&self) -> impl Iterator<Item = &T> { self.values.iter() }
+    pub fn len(&self) -> usize {
+        self.values.len()
+    }
+    pub fn iter(&self) -> impl Iterator<Item = &T> {
+        self.values.iter()
+    }
 }
 
 #[cfg(test)]
@@ -603,12 +763,35 @@ mod tests {
 
     #[test]
     fn origin_and_scope_normalization_rejects_unsafe_values() {
-        assert_eq!(normalize_origin("https://example.com/", false).unwrap(), "https://example.com");
+        assert_eq!(
+            normalize_origin("https://example.com/", false).unwrap(),
+            "https://example.com"
+        );
         assert!(normalize_origin("http://example.com", false).is_err());
         assert!(canonical_scope("https://example.com", "account", "/a/../b").is_err());
         let root = canonical_scope("https://example.com", "account", "/a").unwrap();
         let child = canonical_scope("https://example.com", "account", "/a/b").unwrap();
         assert!(scopes_overlap(&root, &child));
+        let uri_scope =
+            canonical_scope("https://example.com", "account", "cloudreve://account@my/a").unwrap();
+        assert_eq!(uri_scope, "https://example.com\0account\0/a");
+    }
+
+    #[test]
+    fn file_event_uses_reference_file_id_and_read_permission_gates_writes() {
+        let event: FileEventDto =
+            serde_json::from_str(r#"{"type":"modify","file_id":"remote-1","from":"/a","to":"/b"}"#)
+                .unwrap();
+        assert_eq!(event.id.as_deref(), Some("remote-1"));
+        let file = RemoteFileDto {
+            id: "remote-1".into(),
+            permission: Some("r".into()),
+            capability: Some("r".into()),
+            ..Default::default()
+        };
+        let item = file.to_remote_item(None);
+        assert!(item.can_read);
+        assert!(!item.can_write);
     }
 
     #[test]
@@ -620,7 +803,14 @@ mod tests {
 
     #[test]
     fn page_tokens_are_small_and_do_not_contain_remote_cursor() {
-        let token = PageToken { version: 1, domain_id: Uuid::new_v4(), parent_id: "cri-parent".into(), snapshot_generation: 4, offset: 800, sort: "name".into() };
+        let token = PageToken {
+            version: 1,
+            domain_id: Uuid::new_v4(),
+            parent_id: "cri-parent".into(),
+            snapshot_generation: 4,
+            offset: 800,
+            sort: "name".into(),
+        };
         let encoded = token.encode().unwrap();
         assert!(encoded.len() < 500);
         assert_eq!(PageToken::decode(&encoded).unwrap(), token);
@@ -629,17 +819,41 @@ mod tests {
     #[test]
     fn sse_parser_handles_multi_line_and_comments() {
         let mut parser = SseParser::new(1024);
-        let events = parser.push(b": keep\r\nevent: file\r\nid: 7\r\ndata: one\r\ndata: two\r\n\r\n data: ignored\n").unwrap();
-        assert_eq!(events, vec![SseEvent { event: Some("file".into()), id: Some("7".into()), data: "one\ntwo".into() }]);
+        let events = parser
+            .push(
+                b": keep\r\nevent: file\r\nid: 7\r\ndata: one\r\ndata: two\r\n\r\n data: ignored\n",
+            )
+            .unwrap();
+        assert_eq!(
+            events,
+            vec![SseEvent {
+                event: Some("file".into()),
+                id: Some("7".into()),
+                data: "one\ntwo".into()
+            }]
+        );
     }
 
     #[test]
     fn sse_parser_preserves_partial_frames_and_multiple_events() {
         let mut parser = SseParser::new(1024);
-        assert_eq!(parser.push(b"event: one\ndata: first\n\neve").unwrap().len(), 1);
+        assert_eq!(
+            parser
+                .push(b"event: one\ndata: first\n\neve")
+                .unwrap()
+                .len(),
+            1
+        );
         let events = parser.push(b"nt: two\ndata: second\n\n").unwrap();
-        assert_eq!(events, vec![SseEvent { event: Some("two".into()), id: None, data: "second".into() }]);
-        assert!(parser.finish().is_empty());
+        assert_eq!(
+            events,
+            vec![SseEvent {
+                event: Some("two".into()),
+                id: None,
+                data: "second".into()
+            }]
+        );
+        assert!(parser.finish().unwrap().is_empty());
     }
 
     #[test]
@@ -647,14 +861,51 @@ mod tests {
         let mut parser = SseParser::new(1024);
         assert!(parser.push(b"event: one\r").unwrap().is_empty());
         let events = parser.push(b"\ndata: first\r\n\r\n").unwrap();
-        assert_eq!(events, vec![SseEvent { event: Some("one".into()), id: None, data: "first".into() }]);
+        assert_eq!(
+            events,
+            vec![SseEvent {
+                event: Some("one".into()),
+                id: None,
+                data: "first".into()
+            }]
+        );
+    }
+
+    #[test]
+    fn sse_parser_limits_the_complete_logical_frame() {
+        let mut parser = SseParser::new(20);
+        assert_eq!(parser.push(b"data: 123456789\n").unwrap().len(), 0);
+        assert_eq!(
+            parser.push(b"data: 123456789\n"),
+            Err(SseError::FrameTooLarge(20))
+        );
+    }
+
+    #[test]
+    fn sync_anchor_encoding_is_bounded() {
+        let anchor = SyncAnchor {
+            version: 1,
+            domain_id: Uuid::new_v4(),
+            scope: "x".repeat(500),
+            epoch: Uuid::new_v4(),
+            sequence: 1,
+        };
+        assert_eq!(anchor.encode(), Err(ProtocolError::ValueTooLarge));
     }
 
     #[test]
     fn anchor_mismatch_is_explicit() {
-        let anchor = SyncAnchor { version: 1, domain_id: Uuid::new_v4(), scope: "root".into(), epoch: Uuid::new_v4(), sequence: 5 };
+        let anchor = SyncAnchor {
+            version: 1,
+            domain_id: Uuid::new_v4(),
+            scope: "root".into(),
+            epoch: Uuid::new_v4(),
+            sequence: 5,
+        };
         let encoded = anchor.encode().unwrap();
         let decoded = SyncAnchor::decode(&encoded).unwrap();
-        assert!(decoded.validate(decoded.domain_id, "other", decoded.epoch, 0).is_err());
+        assert!(decoded
+            .validate(decoded.domain_id, "other", decoded.epoch, 0)
+            .is_err());
     }
 }

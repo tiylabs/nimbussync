@@ -14,6 +14,7 @@ public enum SSEParserError: Error, Equatable { case frameTooLarge, invalidUTF8 }
 
 public final class SSEParser: @unchecked Sendable {
     private var buffer = [UInt8]()
+    private var frameBytes = 0
     private var event: String?
     private var id: String?
     private var dataLines: [String] = []
@@ -25,13 +26,15 @@ public final class SSEParser: @unchecked Sendable {
     public func append(_ bytes: Data) throws -> [SSEEvent] {
         try withLock {
             buffer.append(contentsOf: bytes)
-            guard buffer.count <= maxFrameBytes else { throw SSEParserError.frameTooLarge }
             var events: [SSEEvent] = []
             while let end = lineEnd(in: buffer) {
                 let lineBytes = Array(buffer.prefix(end.offset))
                 buffer.removeFirst(end.offset + end.newlineLength)
+                frameBytes += end.offset + end.newlineLength
+                guard frameBytes <= maxFrameBytes else { throw SSEParserError.frameTooLarge }
                 try consume(line: lineBytes, events: &events)
             }
+            guard frameBytes + buffer.count <= maxFrameBytes else { throw SSEParserError.frameTooLarge }
             return events
         }
     }
@@ -64,9 +67,13 @@ public final class SSEParser: @unchecked Sendable {
     }
 
     private func flush(_ events: inout [SSEEvent]) {
-        guard event != nil || id != nil || !dataLines.isEmpty else { return }
+        guard event != nil || id != nil || !dataLines.isEmpty else {
+            frameBytes = 0
+            return
+        }
         events.append(SSEEvent(event: event, data: dataLines.joined(separator: "\n"), id: id))
         event = nil; id = nil; dataLines.removeAll(keepingCapacity: true)
+        frameBytes = 0
     }
 
     private func withLock<T>(_ body: () throws -> T) rethrows -> T { lock.lock(); defer { lock.unlock() }; return try body() }
@@ -132,6 +139,11 @@ public enum EchoMatcher {
 
 public protocol EventStream: Sendable {
     func next() async throws -> SSEEvent?
+    func cancel() async
+}
+
+public extension EventStream {
+    func cancel() async {}
 }
 
 public protocol EventCoordinatorDelegate: Sendable {
@@ -154,6 +166,14 @@ public actor EventCoordinator {
             do {
                 guard let event = try await stream.next() else { await delegate.markEventDegraded(); await delegate.reconcile(reason: "stream_ended"); break }
                 await consume(event)
+            } catch let failure as CoreFailure where failure.code == .authentication {
+                if let supervisorDelegate = delegate as? EventSupervisorDelegate {
+                    await supervisorDelegate.markAuthenticationExpired()
+                    await supervisorDelegate.setConnectionState(.authExpired)
+                } else {
+                    await delegate.markEventDegraded()
+                }
+                break
             } catch {
                 await delegate.markEventDegraded()
                 await delegate.reconcile(reason: "stream_error")
@@ -165,17 +185,41 @@ public actor EventCoordinator {
     private func consume(_ event: SSEEvent) async {
         let eventName = event.event?.lowercased() ?? "message"
         switch eventName {
-        case "subscribed": await delegate.reconcile(reason: "subscribed")
+        case "subscribed":
+            if let supervisorDelegate = delegate as? EventSupervisorDelegate { await supervisorDelegate.setConnectionState(.subscribed) }
+            else { await delegate.reconcile(reason: "subscribed") }
         case "resumed": await delegate.reconcile(reason: "resumed_unknown_gap")
         case "keep-alive", "keepalive": break
-        case "reconnect-required": await delegate.markEventDegraded(); await delegate.reconcile(reason: "reconnect_required")
+        case "reconnect-required":
+            await delegate.markEventDegraded()
+            await delegate.reconcile(reason: "reconnect_required")
+            running = false
         default:
             guard let name = event.event?.lowercased(), ["event", "file", "create", "modify", "rename", "delete"].contains(name), !event.data.isEmpty else {
                 await delegate.markEventDegraded()
                 await delegate.reconcile(reason: "unknown_or_malformed_event")
                 return
             }
-            await delegate.handle(hint: RemoteEventHint(kind: .file, payload: event.data))
+            let payloads: [RemoteEventPayload]
+            if let decoded = try? JSONDecoder().decode([RemoteEventPayload].self, from: Data(event.data.utf8)) {
+                payloads = decoded
+            } else if let decoded = try? JSONDecoder().decode(RemoteEventPayload.self, from: Data(event.data.utf8)) {
+                payloads = [decoded]
+            } else {
+                await delegate.markEventDegraded()
+                await delegate.reconcile(reason: "unknown_or_malformed_event")
+                return
+            }
+            guard !payloads.isEmpty else {
+                await delegate.markEventDegraded()
+                await delegate.reconcile(reason: "unknown_or_malformed_event")
+                return
+            }
+            for payload in payloads {
+                let kind = RemoteEventKind(rawValue: (payload.type ?? name).lowercased()) ?? .file
+                let encodedPayload = (try? JSONEncoder().encode(payload)).flatMap { String(data: $0, encoding: .utf8) }
+                await delegate.handle(hint: RemoteEventHint(kind: kind, remoteID: payload.id, fromURI: payload.from, toURI: payload.to, payload: encodedPayload))
+            }
         }
     }
 }
@@ -186,9 +230,18 @@ public protocol EventStreamFactory: Sendable {
 
 public protocol EventSupervisorDelegate: EventCoordinatorDelegate {
     func setConnectionState(_ state: ConnectionState) async
+    func markAuthenticationExpired() async
+    func isAuthenticationExpired() async -> Bool
+    func shouldRestartStream() async -> Bool
 }
 
-public enum ConnectionState: String, Sendable { case connecting, subscribed, resumedUnknownGap = "resumed_unknown_gap", degraded, offline, stopped }
+public extension EventSupervisorDelegate {
+    func markAuthenticationExpired() async { await markEventDegraded() }
+    func isAuthenticationExpired() async -> Bool { false }
+    func shouldRestartStream() async -> Bool { false }
+}
+
+public enum ConnectionState: String, Sendable { case connecting, subscribed, resumedUnknownGap = "resumed_unknown_gap", degraded, offline, authExpired = "auth_expired", stopped }
 
 /// Owns one stream per Domain. A stream ending is a reconnect condition, not
 /// a healthy completion; each new subscription asks the delegate to reconcile.
@@ -197,10 +250,17 @@ public actor EventSupervisor {
     private let delegate: EventSupervisorDelegate
     private var policy = ReconnectPolicy()
     private var running = false
+    private var activeStream: EventStream?
+    private var activeCoordinator: EventCoordinator?
 
     public init(factory: EventStreamFactory, delegate: EventSupervisorDelegate) { self.factory = factory; self.delegate = delegate }
 
-    public func stop() async { running = false; await delegate.setConnectionState(.stopped) }
+    public func stop() async {
+        running = false
+        await activeStream?.cancel()
+        await activeCoordinator?.stop()
+        await delegate.setConnectionState(.stopped)
+    }
 
     public func run() async {
         running = true
@@ -208,12 +268,28 @@ public actor EventSupervisor {
             await delegate.setConnectionState(.connecting)
             do {
                 let stream = try await factory.open()
+                let connectionStartedAt = Date()
+                activeStream = stream
                 await delegate.setConnectionState(.subscribed)
+                await delegate.reconcile(reason: "connected")
+                if await delegate.shouldRestartStream() {
+                    await stream.cancel()
+                    activeStream = nil
+                    continue
+                }
                 let coordinator = EventCoordinator(delegate: delegate)
+                activeCoordinator = coordinator
                 await coordinator.run(stream: stream)
+                activeCoordinator = nil
+                activeStream = nil
                 guard running else { break }
+                if await delegate.isAuthenticationExpired() { break }
+                if Date().timeIntervalSince(connectionStartedAt) >= 30 { policy.reset() }
                 await delegate.setConnectionState(.degraded)
-                await delegate.reconcile(reason: "stream_ended")
+            } catch let failure as CoreFailure where failure.code == .authentication {
+                await delegate.markAuthenticationExpired()
+                await delegate.setConnectionState(.authExpired)
+                break
             } catch {
                 await delegate.setConnectionState(.degraded)
                 await delegate.markEventDegraded()
@@ -233,11 +309,7 @@ public final class FileProviderWorkingSetSignaller: WorkingSetSignaller, @unchec
     private let manager: NSFileProviderManager
     public init(manager: NSFileProviderManager) { self.manager = manager }
     public func signalWorkingSet() async throws {
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            manager.signalEnumerator(for: .workingSet) { error in
-                if let error { continuation.resume(throwing: error) } else { continuation.resume() }
-            }
-        }
+        try await manager.signalEnumerator(for: .workingSet)
     }
 }
 
@@ -273,9 +345,28 @@ public actor EventJournalWriter {
 
     public init(store: SQLiteStateStore, outboxDrainer: SignalOutboxDrainer? = nil) { self.store = store; self.outboxDrainer = outboxDrainer }
 
-    public func commit(_ change: EnrichedRemoteChange) async throws -> JournalChange {
-        try store.insertItem(change.item)
-        let journal = try store.appendProviderChange(itemIdentifier: change.item.itemIdentifier, oldParentIdentifier: change.oldParentIdentifier, newParentIdentifier: change.newParentIdentifier, kind: change.kind, version: change.item.version.content, origin: "remote_event")
+    public func commit(_ change: EnrichedRemoteChange) async throws -> JournalChange? {
+        if let existing = try store.item(identifier: change.item.itemIdentifier),
+           existing.remoteID == change.item.remoteID,
+           existing.parentIdentifier == change.item.parentIdentifier,
+           existing.name == change.item.name,
+           existing.uri == change.item.uri,
+           existing.kind == change.item.kind,
+           existing.size == change.item.size,
+           existing.remoteVersion == change.item.remoteVersion,
+           existing.creationDate == change.item.creationDate,
+           existing.contentModificationDate == change.item.contentModificationDate,
+           existing.canRead == change.item.canRead,
+           existing.canWrite == change.item.canWrite,
+           existing.canAddChildren == change.item.canAddChildren,
+           existing.canTrash == change.item.canTrash,
+           existing.canDelete == change.item.canDelete,
+           existing.trashed == change.item.trashed,
+           existing.tombstone == change.item.tombstone,
+           existing.version == change.item.version {
+            return nil
+        }
+        let journal = try store.commitProviderChange(item: change.item, oldParentIdentifier: change.oldParentIdentifier, newParentIdentifier: change.newParentIdentifier, kind: change.kind, origin: "remote_event")
         await outboxDrainer?.drain()
         return journal
     }

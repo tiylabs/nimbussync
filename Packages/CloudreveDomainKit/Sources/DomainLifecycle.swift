@@ -33,23 +33,24 @@ public enum DomainProvisioningStep: String, Codable, Sendable {
 public struct DomainProvisioningRecord: Codable, Equatable, Sendable {
     public let actionID: UUID
     public let domainID: String
+    public let secretReference: String?
     public var step: DomainProvisioningStep
     public var systemDomainSeen: Bool
     public var errorCode: String?
-    public init(actionID: UUID = UUID(), domainID: String, step: DomainProvisioningStep = .prepared, systemDomainSeen: Bool = false, errorCode: String? = nil) {
-        self.actionID = actionID; self.domainID = domainID; self.step = step; self.systemDomainSeen = systemDomainSeen; self.errorCode = errorCode
+    public init(actionID: UUID = UUID(), domainID: String, secretReference: String? = nil, step: DomainProvisioningStep = .prepared, systemDomainSeen: Bool = false, errorCode: String? = nil) {
+        self.actionID = actionID; self.domainID = domainID; self.secretReference = secretReference; self.step = step; self.systemDomainSeen = systemDomainSeen; self.errorCode = errorCode
     }
 }
 
 public enum DomainProvisioningReducer {
     public static func recover(record: DomainProvisioningRecord, systemDomainExists: Bool) -> DomainProvisioningStep {
-        if record.step == .registered { return .registered }
-        if systemDomainExists { return record.step == .firstReadHealthy ? .registered : .systemDomainAdded }
-        switch record.step {
-        case .prepared, .credentialWritten, .domainDatabaseReady: return record.step
-        case .systemDomainAdded, .firstReadHealthy, .rollbackRequired: return .rollbackRequired
-        case .registered: return .registered
+        if record.step == .registered { return systemDomainExists ? .registered : .rollbackRequired }
+        if record.step == .rollbackRequired { return .rollbackRequired }
+        if !systemDomainExists {
+            return .rollbackRequired
         }
+        if systemDomainExists { return record.step == .firstReadHealthy ? .registered : .systemDomainAdded }
+        return .rollbackRequired
     }
 }
 
@@ -160,11 +161,13 @@ public enum AppGroupPaths {
     }
 
     public static func domainURL(_ domainIdentifier: String, fileManager: FileManager = .default) -> URL? {
-        root(fileManager: fileManager)?.appendingPathComponent("Domains/\(domainIdentifier)/state.sqlite3")
+        guard CloudreveIdentifier.validate(domainIdentifier, prefix: CloudreveIdentifier.domainPrefix) else { return nil }
+        return root(fileManager: fileManager)?.appendingPathComponent("Domains/\(domainIdentifier)/state.sqlite3")
     }
 
     public static func domainVersionURL(_ domainIdentifier: String, fileManager: FileManager = .default) -> URL? {
-        root(fileManager: fileManager)?.appendingPathComponent("Domains/\(domainIdentifier)/domain-version.archive")
+        guard CloudreveIdentifier.validate(domainIdentifier, prefix: CloudreveIdentifier.domainPrefix) else { return nil }
+        return root(fileManager: fileManager)?.appendingPathComponent("Domains/\(domainIdentifier)/domain-version.archive")
     }
 
     public static func prepareDomain(_ domainIdentifier: String, fileManager: FileManager = .default) throws -> URL? {

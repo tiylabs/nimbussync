@@ -15,6 +15,7 @@ public enum SecretRedactor {
             #"(?i)(authorization\s*:\s*bearer\s+)[^\s,;]+"#,
             #"(?i)(bearer\s+)[^\s,;]+"#,
             #"(?i)((?:access|refresh|client|callback|upload)[_-]?(?:token|secret)\s*[=:]\s*)[^\s,;&]+"#,
+            #"(?i)([?&](?:token|signature|sig|expires|x-amz-[^=]+|x-goog-[^=]+)=)[^&#\s]+"#,
         ]
         for pattern in patterns {
             output = output.replacingOccurrences(of: pattern, with: "$1[REDACTED]", options: .regularExpression)
