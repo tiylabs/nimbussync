@@ -1,0 +1,91 @@
+# macOS filesystem metadata
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100/
+.Trashes/
+.fseventsd/
+
+# Xcode user and workspace state
+**/xcuserdata/
+*.xcuserstate
+*.xcscmblueprint
+*.xccheckout
+*.moved-aside
+*.pbxuser
+!default.pbxuser
+*.mode1v3
+!default.mode1v3
+*.mode2v3
+!default.mode2v3
+*.perspectivev3
+!default.perspectivev3
+*.hmap
+
+# Xcode, SwiftPM, and test outputs
+/DerivedData/
+/Build/
+/build/
+.build/
+.swiftpm/
+*.xcarchive/
+*.xcresult/
+*.dSYM/
+*.dSYM.zip
+*.app/
+*.appex/
+
+# Rust build and coverage outputs. Cargo.lock remains tracked for reproducibility.
+target/
+*.profraw
+*.profdata
+/.llvm-cov/
+/Coverage/
+/coverage/
+lcov.info
+
+# Generated binary FFI products. UniFFI source bindings remain tracked so CI can detect drift.
+**/CloudreveCore.xcframework/
+**/CloudreveCore.xcframework.zip
+
+# Phase-gate, test, and release artifacts
+/Artifacts/
+/TestResults/
+/Dist/
+/dist/
+*.dmg
+*.pkg
+*.notarylog
+*.crash
+*.ips
+
+# Local runtime state; production App Group data lives outside the repository.
+/Runtime/
+/Logs/
+/Diagnostics/
+/Transfers/
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite-journal
+*.log
+
+# Local configuration and signing secrets. Shared xcconfig and entitlements remain tracked.
+.env
+.env.*
+!.env.example
+*.local.xcconfig
+Local.xcconfig
+Secrets.xcconfig
+/Config/Signing/
+/Config/Secrets/
+*.p12
+*.mobileprovision
+*.provisionprofile
+
+# Editor-local files
+.idea/
+.fleet/
+*.swp
+*.swo
+*~
