@@ -1,7 +1,7 @@
 # 阶段 2 实施计划：写路径、上传恢复与冲突安全
 
 > 阶段编号：Phase 2
-> 阶段状态：Planned
+> 阶段状态：Conditional Go（本地 operation/uploader/conflict/removal 门禁完成；真实 Cloudreve/Provider/Finder 写入证据待补）
 > 目标版本：0.5 Beta 写能力
 > 前序阶段：[阶段 1：持久化、认证与读路径](./04-phase-1-persistence-read-path.md)
 > 后续阶段：[阶段 3：SSE 与最终一致性](./06-phase-3-events-consistency.md)

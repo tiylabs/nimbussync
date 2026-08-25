@@ -1,7 +1,7 @@
 # 阶段 1 实施计划：持久化、认证与 File Provider 读路径
 
 > 阶段编号：Phase 1
-> 阶段状态：Planned
+> 阶段状态：Conditional Go（本地 Store/Auth/read-path 门禁完成；真实签名 App Group/Keychain/Finder/Cloudreve 规模证据待补）
 > 目标版本：Technical Preview
 > 前序阶段：[阶段 0：协议门禁与 File Provider Spike](./03-phase-0-protocol-file-provider-spike.md)
 > 后续阶段：[阶段 2：写路径与上传恢复](./05-phase-2-write-path-upload-recovery.md)

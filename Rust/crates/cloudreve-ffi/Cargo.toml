@@ -1,0 +1,13 @@
+[package]
+name = "cloudreve-ffi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+cloudreve-core = { path = "../cloudreve-core" }
+cloudreve-protocol = { path = "../cloudreve-protocol" }
+

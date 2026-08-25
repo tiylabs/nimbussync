@@ -1,0 +1,142 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		A10000000000000000000001 /* CloudreveMacApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000001 /* CloudreveMacApp.swift */; };
+		A10000000000000000000002 /* FileProviderExtension.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000002 /* FileProviderExtension.swift */; };
+		A10000000000000000000003 /* ActionViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000003 /* ActionViewController.swift */; };
+		A10000000000000000000004 /* CloudreveDesignSystem in Frameworks */ = {isa = PBXBuildFile; productRef = A50000000000000000000001 /* CloudreveDesignSystem */; };
+		A10000000000000000000005 /* CloudreveDomainKit in Frameworks */ = {isa = PBXBuildFile; productRef = A50000000000000000000002 /* CloudreveDomainKit */; };
+		A10000000000000000000006 /* CloudreveFileProviderKit in Frameworks */ = {isa = PBXBuildFile; productRef = A50000000000000000000003 /* CloudreveFileProviderKit */; };
+		A10000000000000000000007 /* CloudreveMacTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000004 /* CloudreveMacTests.swift */; };
+		A10000000000000000000008 /* CloudreveProductKit in Frameworks */ = {isa = PBXBuildFile; productRef = A50000000000000000000004 /* CloudreveProductKit */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		A20000000000000000000001 /* CloudreveMacApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudreveMacApp.swift; sourceTree = "<group>"; };
+		A20000000000000000000002 /* FileProviderExtension.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileProviderExtension.swift; sourceTree = "<group>"; };
+		A20000000000000000000003 /* ActionViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActionViewController.swift; sourceTree = "<group>"; };
+		A20000000000000000000004 /* CloudreveMacTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudreveMacTests.swift; sourceTree = "<group>"; };
+		A20000000000000000000005 /* Cloudreve.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Cloudreve.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A20000000000000000000006 /* CloudreveFileProvider.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = CloudreveFileProvider.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		A20000000000000000000007 /* CloudreveFileProviderUI.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = CloudreveFileProviderUI.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		A20000000000000000000008 /* CloudreveMacTests.xctest */ = {isa = PBXFileReference; explicitFileType = "wrapper.cfbundle"; includeInIndex = 0; path = CloudreveMacTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		A20000000000000000000009 /* CloudreveMac-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = CloudreveMac-Info.plist; sourceTree = "<group>"; };
+		A2000000000000000000000A /* CloudreveFileProvider-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = CloudreveFileProvider-Info.plist; sourceTree = "<group>"; };
+		A2000000000000000000000B /* CloudreveFileProviderUI-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = CloudreveFileProviderUI-Info.plist; sourceTree = "<group>"; };
+		A2000000000000000000000C /* CloudreveMac.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = CloudreveMac.entitlements; sourceTree = "<group>"; };
+		A2000000000000000000000D /* CloudreveFileProvider.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = CloudreveFileProvider.entitlements; sourceTree = "<group>"; };
+		A20000000000000000000012 /* CloudreveMacRelease.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = CloudreveMacRelease.entitlements; sourceTree = "<group>"; };
+		A20000000000000000000013 /* CloudreveFileProviderRelease.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = CloudreveFileProviderRelease.entitlements; sourceTree = "<group>"; };
+		A2000000000000000000000E /* CloudreveFileProviderDebug.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = CloudreveFileProviderDebug.entitlements; sourceTree = "<group>"; };
+		A2000000000000000000000F /* CloudreveFileProviderUI.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = CloudreveFileProviderUI.entitlements; sourceTree = "<group>"; };
+		A20000000000000000000010 /* Debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Debug.xcconfig; sourceTree = "<group>"; };
+		A20000000000000000000011 /* Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Release.xcconfig; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		A30000000000000000000001 /* CloudreveMac Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (A10000000000000000000004, A10000000000000000000005, A10000000000000000000008, ); runOnlyForDeploymentPostprocessing = 0; };
+		A30000000000000000000002 /* CloudreveFileProvider Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (A10000000000000000000006, ); runOnlyForDeploymentPostprocessing = 0; };
+		A30000000000000000000003 /* CloudreveFileProviderUI Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		A30000000000000000000004 /* CloudreveMacTests Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (A10000000000000000000004, A10000000000000000000005, A10000000000000000000006, ); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		A40000000000000000000001 = {isa = PBXGroup; children = (A40000000000000000000002, A40000000000000000000003, A40000000000000000000004, A40000000000000000000005, A40000000000000000000006, A40000000000000000000007, ); sourceTree = "<group>"; };
+		A40000000000000000000002 /* Apps */ = {isa = PBXGroup; children = (A40000000000000000000008, ); path = Apps; sourceTree = "<group>"; };
+		A40000000000000000000003 /* Extensions */ = {isa = PBXGroup; children = (A40000000000000000000009, A4000000000000000000000A, ); path = Extensions; sourceTree = "<group>"; };
+		A40000000000000000000004 /* Config */ = {isa = PBXGroup; children = (A20000000000000000000009, A2000000000000000000000A, A2000000000000000000000B, A2000000000000000000000C, A2000000000000000000000D, A2000000000000000000000E, A2000000000000000000000F, A20000000000000000000010, A20000000000000000000011, A20000000000000000000012, A20000000000000000000013, ); path = Config; sourceTree = "<group>"; };
+		A40000000000000000000005 /* Tests */ = {isa = PBXGroup; children = (A4000000000000000000000B, ); path = Tests; sourceTree = "<group>"; };
+		A40000000000000000000006 /* Products */ = {isa = PBXGroup; children = (A20000000000000000000005, A20000000000000000000006, A20000000000000000000007, A20000000000000000000008, ); name = Products; sourceTree = "<group>"; };
+		A40000000000000000000008 /* CloudreveMac */ = {isa = PBXGroup; children = (A20000000000000000000001, ); path = CloudreveMac; sourceTree = "<group>"; };
+		A40000000000000000000009 /* CloudreveFileProvider */ = {isa = PBXGroup; children = (A20000000000000000000002, ); path = CloudreveFileProvider; sourceTree = "<group>"; };
+		A4000000000000000000000A /* CloudreveFileProviderUI */ = {isa = PBXGroup; children = (A20000000000000000000003, ); path = CloudreveFileProviderUI; sourceTree = "<group>"; };
+		A4000000000000000000000B /* SwiftUnitTests */ = {isa = PBXGroup; children = (A20000000000000000000004, ); path = SwiftUnitTests; sourceTree = "<group>"; };
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		A60000000000000000000001 /* CloudreveMac */ = {isa = PBXNativeTarget; buildConfigurationList = A70000000000000000000001; buildPhases = (A3000000000000000000000D, A30000000000000000000001, A30000000000000000000006, ); buildRules = (); dependencies = (A80000000000000000000001, A80000000000000000000002, ); name = CloudreveMac; packageProductDependencies = (A50000000000000000000001, A50000000000000000000002, A50000000000000000000004, ); productName = Cloudreve; productReference = A20000000000000000000005; productType = "com.apple.product-type.application"; };
+		A60000000000000000000002 /* CloudreveFileProvider */ = {isa = PBXNativeTarget; buildConfigurationList = A70000000000000000000002; buildPhases = (A30000000000000000000007, A30000000000000000000002, A30000000000000000000008, ); buildRules = (); dependencies = (); name = CloudreveFileProvider; packageProductDependencies = (A50000000000000000000003, ); productName = CloudreveFileProvider; productReference = A20000000000000000000006; productType = "com.apple.product-type.app-extension"; };
+		A60000000000000000000003 /* CloudreveFileProviderUI */ = {isa = PBXNativeTarget; buildConfigurationList = A70000000000000000000003; buildPhases = (A30000000000000000000009, A30000000000000000000003, A3000000000000000000000A, ); buildRules = (); dependencies = (); name = CloudreveFileProviderUI; packageProductDependencies = (); productName = CloudreveFileProviderUI; productReference = A20000000000000000000007; productType = "com.apple.product-type.app-extension"; };
+		A60000000000000000000004 /* CloudreveMacTests */ = {isa = PBXNativeTarget; buildConfigurationList = A70000000000000000000004; buildPhases = (A3000000000000000000000B, A30000000000000000000004, A3000000000000000000000C, ); buildRules = (); dependencies = (A80000000000000000000003, ); name = CloudreveMacTests; packageProductDependencies = (A50000000000000000000001, A50000000000000000000002, A50000000000000000000003, A50000000000000000000004, ); productName = CloudreveMacTests; productReference = A20000000000000000000008; productType = "com.apple.product-type.bundle.unit-test"; };
+		A60000000000000000000005 /* CloudrevePhaseGates */ = {isa = PBXNativeTarget; buildConfigurationList = A70000000000000000000005; buildPhases = (); buildRules = (); dependencies = (); name = CloudrevePhaseGates; productName = CloudrevePhaseGates; productType = "com.apple.product-type.aggregate"; };
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		A90000000000000000000001 /* Project object */ = {isa = PBXProject; attributes = { LastUpgradeCheck = 2620; ORGANIZATIONNAME = Cloudreve; TargetAttributes = { A60000000000000000000001 = { CreatedOnToolsVersion = 26.2; }; A60000000000000000000002 = { CreatedOnToolsVersion = 26.2; }; A60000000000000000000003 = { CreatedOnToolsVersion = 26.2; }; A60000000000000000000004 = { CreatedOnToolsVersion = 26.2; TestTargetID = A60000000000000000000001; }; A60000000000000000000005 = { CreatedOnToolsVersion = 26.2; }; }; }; buildConfigurationList = A70000000000000000000006; compatibilityVersion = "Xcode 15.0"; developmentRegion = en; hasScannedForEncodings = 0; knownRegions = (en, zh-Hans, ); mainGroup = A40000000000000000000001; packageReferences = (AA00000000000000000000001, ); productRefGroup = A40000000000000000000006; projectDirPath = ""; projectRoot = ""; targets = (A60000000000000000000001, A60000000000000000000002, A60000000000000000000003, A60000000000000000000004, A60000000000000000000005, ); };
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		A30000000000000000000006 /* CloudreveMac Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		A30000000000000000000008 /* CloudreveFileProvider Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		A3000000000000000000000A /* CloudreveFileProviderUI Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		A3000000000000000000000C /* CloudreveMacTests Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		A30000000000000000000005 /* Build Rust Core */ = {isa = PBXShellScriptBuildPhase; buildActionMask = 2147483647; files = (); inputPaths = (); name = "Build Rust Core"; outputPaths = (); runOnlyForDeploymentPostprocessing = 0; shellPath = /bin/sh; shellScript = "if [ \"$CONFIGURATION\" = \"Release\" ]; then echo 'Rust XCFramework is built by the release gate'; fi"; };
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		A30000000000000000000007 /* CloudreveFileProvider Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A10000000000000000000002, ); runOnlyForDeploymentPostprocessing = 0; };
+		A30000000000000000000009 /* CloudreveFileProviderUI Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A10000000000000000000003, ); runOnlyForDeploymentPostprocessing = 0; };
+		A3000000000000000000000B /* CloudreveMacTests Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A10000000000000000000007, ); runOnlyForDeploymentPostprocessing = 0; };
+		A3000000000000000000000D /* CloudreveMac Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A10000000000000000000001, ); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		A80000000000000000000001 = {isa = PBXTargetDependency; target = A60000000000000000000002; targetProxy = A80000000000000000000004; };
+		A80000000000000000000002 = {isa = PBXTargetDependency; target = A60000000000000000000003; targetProxy = A80000000000000000000005; };
+		A80000000000000000000003 = {isa = PBXTargetDependency; target = A60000000000000000000001; targetProxy = A80000000000000000000006; };
+/* End PBXTargetDependency section */
+
+/* Begin PBXContainerItemProxy section */
+		A80000000000000000000004 = {isa = PBXContainerItemProxy; containerPortal = A90000000000000000000001; proxyType = 1; remoteGlobalIDString = A60000000000000000000002; remoteInfo = CloudreveFileProvider; };
+		A80000000000000000000005 = {isa = PBXContainerItemProxy; containerPortal = A90000000000000000000001; proxyType = 1; remoteGlobalIDString = A60000000000000000000003; remoteInfo = CloudreveFileProviderUI; };
+		A80000000000000000000006 = {isa = PBXContainerItemProxy; containerPortal = A90000000000000000000001; proxyType = 1; remoteGlobalIDString = A60000000000000000000001; remoteInfo = CloudreveMac; };
+/* End PBXContainerItemProxy section */
+
+/* Begin XCBuildConfiguration section */
+		A71000000000000000000001 = {isa = XCBuildConfiguration; baseConfigurationReference = A20000000000000000000010; buildSettings = { ALWAYS_SEARCH_USER_PATHS = NO; CLANG_ENABLE_MODULES = YES; CODE_SIGN_ENTITLEMENTS = Config/CloudreveMac.entitlements; CURRENT_PROJECT_VERSION = 1; INFOPLIST_FILE = Config/CloudreveMac-Info.plist; PRODUCT_BUNDLE_IDENTIFIER = com.cloudreve.mac; PRODUCT_NAME = Cloudreve; SWIFT_VERSION = 6.0; }; name = Debug; };
+		A71000000000000000000002 = {isa = XCBuildConfiguration; baseConfigurationReference = A20000000000000000000011; buildSettings = { CODE_SIGN_ENTITLEMENTS = Config/CloudreveMacRelease.entitlements; CURRENT_PROJECT_VERSION = 1; INFOPLIST_FILE = Config/CloudreveMac-Info.plist; PRODUCT_BUNDLE_IDENTIFIER = com.cloudreve.mac; PRODUCT_NAME = Cloudreve; SWIFT_VERSION = 6.0; }; name = Release; };
+		A71000000000000000000003 = {isa = XCBuildConfiguration; buildSettings = { ALWAYS_SEARCH_USER_PATHS = NO; CODE_SIGN_ENTITLEMENTS = Config/CloudreveFileProviderDebug.entitlements; CURRENT_PROJECT_VERSION = 1; INFOPLIST_FILE = Config/CloudreveFileProvider-Info.plist; PRODUCT_BUNDLE_IDENTIFIER = com.cloudreve.mac.FileProvider; PRODUCT_NAME = CloudreveFileProvider; SWIFT_VERSION = 6.0; }; name = Debug; };
+		A71000000000000000000004 = {isa = XCBuildConfiguration; buildSettings = { CODE_SIGN_ENTITLEMENTS = Config/CloudreveFileProviderRelease.entitlements; CURRENT_PROJECT_VERSION = 1; INFOPLIST_FILE = Config/CloudreveFileProvider-Info.plist; PRODUCT_BUNDLE_IDENTIFIER = com.cloudreve.mac.FileProvider; PRODUCT_NAME = CloudreveFileProvider; SWIFT_VERSION = 6.0; }; name = Release; };
+		A71000000000000000000005 = {isa = XCBuildConfiguration; buildSettings = { CODE_SIGN_ENTITLEMENTS = Config/CloudreveFileProviderUI.entitlements; CURRENT_PROJECT_VERSION = 1; INFOPLIST_FILE = Config/CloudreveFileProviderUI-Info.plist; PRODUCT_BUNDLE_IDENTIFIER = com.cloudreve.mac.FileProviderUI; PRODUCT_NAME = CloudreveFileProviderUI; SWIFT_VERSION = 6.0; }; name = Debug; };
+		A71000000000000000000006 = {isa = XCBuildConfiguration; buildSettings = { CODE_SIGN_ENTITLEMENTS = Config/CloudreveFileProviderUI.entitlements; CURRENT_PROJECT_VERSION = 1; INFOPLIST_FILE = Config/CloudreveFileProviderUI-Info.plist; PRODUCT_BUNDLE_IDENTIFIER = com.cloudreve.mac.FileProviderUI; PRODUCT_NAME = CloudreveFileProviderUI; SWIFT_VERSION = 6.0; }; name = Release; };
+		A71000000000000000000007 = {isa = XCBuildConfiguration; baseConfigurationReference = A20000000000000000000010; buildSettings = { BUNDLE_LOADER = "$(TEST_HOST)"; CURRENT_PROJECT_VERSION = 1; GENERATE_INFOPLIST_FILE = YES; PRODUCT_BUNDLE_IDENTIFIER = com.cloudreve.mac.tests; PRODUCT_NAME = CloudreveMacTests; SWIFT_VERSION = 6.0; TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Cloudreve.app/Contents/MacOS/Cloudreve"; }; name = Debug; };
+		A71000000000000000000008 = {isa = XCBuildConfiguration; baseConfigurationReference = A20000000000000000000011; buildSettings = { BUNDLE_LOADER = "$(TEST_HOST)"; CURRENT_PROJECT_VERSION = 1; GENERATE_INFOPLIST_FILE = YES; PRODUCT_BUNDLE_IDENTIFIER = com.cloudreve.mac.tests; PRODUCT_NAME = CloudreveMacTests; SWIFT_VERSION = 6.0; TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Cloudreve.app/Contents/MacOS/Cloudreve"; }; name = Release; };
+		A71000000000000000000009 = {isa = XCBuildConfiguration; buildSettings = { PRODUCT_NAME = CloudrevePhaseGates; }; name = Debug; };
+		A7100000000000000000000A = {isa = XCBuildConfiguration; buildSettings = { PRODUCT_NAME = CloudrevePhaseGates; }; name = Release; };
+		A7100000000000000000000B = {isa = XCBuildConfiguration; buildSettings = { MACOSX_DEPLOYMENT_TARGET = 13.0; SWIFT_VERSION = 6.0; }; name = Debug; };
+		A7100000000000000000000C = {isa = XCBuildConfiguration; buildSettings = { MACOSX_DEPLOYMENT_TARGET = 13.0; SWIFT_VERSION = 6.0; }; name = Release; };
+		A7100000000000000000000D = {isa = XCBuildConfiguration; buildSettings = { MACOSX_DEPLOYMENT_TARGET = 13.0; SWIFT_VERSION = 6.0; }; name = Debug; };
+		A7100000000000000000000E = {isa = XCBuildConfiguration; buildSettings = { MACOSX_DEPLOYMENT_TARGET = 13.0; SWIFT_VERSION = 6.0; }; name = Release; };
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		A70000000000000000000001 = {isa = XCConfigurationList; buildConfigurations = (A71000000000000000000001, A71000000000000000000002, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		A70000000000000000000002 = {isa = XCConfigurationList; buildConfigurations = (A71000000000000000000003, A71000000000000000000004, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		A70000000000000000000003 = {isa = XCConfigurationList; buildConfigurations = (A71000000000000000000005, A71000000000000000000006, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		A70000000000000000000004 = {isa = XCConfigurationList; buildConfigurations = (A71000000000000000000007, A71000000000000000000008, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		A70000000000000000000005 = {isa = XCConfigurationList; buildConfigurations = (A71000000000000000000009, A7100000000000000000000A, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		A70000000000000000000006 = {isa = XCConfigurationList; buildConfigurations = (A7100000000000000000000B, A7100000000000000000000C, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		AA00000000000000000000001 = {isa = XCLocalSwiftPackageReference; relativePath = .; };
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		A50000000000000000000001 /* CloudreveDesignSystem */ = {isa = XCSwiftPackageProductDependency; package = AA00000000000000000000001; productName = CloudreveDesignSystem; };
+		A50000000000000000000002 /* CloudreveDomainKit */ = {isa = XCSwiftPackageProductDependency; package = AA00000000000000000000001; productName = CloudreveDomainKit; };
+		A50000000000000000000003 /* CloudreveFileProviderKit */ = {isa = XCSwiftPackageProductDependency; package = AA00000000000000000000001; productName = CloudreveFileProviderKit; };
+		A50000000000000000000004 /* CloudreveProductKit */ = {isa = XCSwiftPackageProductDependency; package = AA00000000000000000000001; productName = CloudreveProductKit; };
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = A90000000000000000000001 /* Project object */;
+}

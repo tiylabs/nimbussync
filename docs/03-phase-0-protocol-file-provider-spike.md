@@ -1,7 +1,7 @@
 # 阶段 0 实施计划：协议门禁与 File Provider Spike
 
 > 阶段编号：Phase 0
-> 阶段状态：Planned
+> 阶段状态：Conditional Go（本地工程/自动化门禁完成；真实 Cloudreve、签名 Finder 与 Provider 环境证据待补）
 > 目标版本：Technical Preview 前置门禁
 > 输入文档：[产品需求](./01-macos-product-requirements.md)、[技术架构](./02-macos-technical-architecture.md)
 > 后续阶段：[阶段 1：持久化与读路径](./04-phase-1-persistence-read-path.md)

@@ -1,0 +1,24 @@
+[package]
+name = "cloudreve-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+async-trait = "0.1"
+aes = "0.8"
+bytes = "1.10"
+cloudreve-protocol = { path = "../cloudreve-protocol" }
+cloudreve-store = { path = "../cloudreve-store" }
+futures-util = "0.3"
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
+ctr = "0.9"
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tokio = { version = "1.48", features = ["sync", "time"] }
+thiserror.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+tempfile = "3.23"

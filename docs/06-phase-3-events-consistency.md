@@ -1,7 +1,7 @@
 # 阶段 3 实施计划：SSE、变更交付与最终一致性
 
 > 阶段编号：Phase 3
-> 阶段状态：Planned
+> 阶段状态：Conditional Go（本地事件/一致性门禁完成；真实 SSE/Finder/长稳环境证据待补）
 > 目标版本：0.5 Beta 一致性闭环
 > 前序阶段：[阶段 2：写路径、上传恢复与冲突安全](./05-phase-2-write-path-upload-recovery.md)
 > 后续阶段：[阶段 4：1.0 产品化与发布](./07-phase-4-product-release.md)

@@ -1,7 +1,7 @@
 # 阶段 4 实施计划：1.0 产品化、质量与发布
 
 > 阶段编号：Phase 4
-> 阶段状态：Planned
+> 阶段状态：Conditional Go（产品化/自动化基础完成；1.0 发布证据未齐，当前 No-Go）
 > 目标版本：1.0
 > 前序阶段：[阶段 3：SSE、变更交付与最终一致性](./06-phase-3-events-consistency.md)
 > 完整验收基线：[产品需求 AC-001 至 AC-014](./01-macos-product-requirements.md#12-10-端到端验收场景)
