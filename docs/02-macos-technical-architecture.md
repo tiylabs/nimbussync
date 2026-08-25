@@ -1225,6 +1225,18 @@ thumbnail
 
 ## 20. 分阶段实施
 
+详细实施计划按阶段独立维护：
+
+| 阶段 | 计划文档 | 核心退出结果 |
+|---:|---|---|
+| Phase 0 | [协议门禁与 File Provider Spike](./03-phase-0-protocol-file-provider-spike.md) | 协议/平台风险被验证，能力矩阵和最低版本冻结 |
+| Phase 1 | [持久化、认证与 File Provider 读路径](./04-phase-1-persistence-read-path.md) | 多 Domain 生产读路径、Store/Auth 和基础产品入口可用 |
+| Phase 2 | [写路径、上传恢复与冲突安全](./05-phase-2-write-path-upload-recovery.md) | mutation、Provider 上传恢复、冲突和安全移除闭环 |
+| Phase 3 | [SSE、变更交付与最终一致性](./06-phase-3-events-consistency.md) | 事件缺失、进程终止和远端根变化后可自动收敛 |
+| Phase 4 | [1.0 产品化、质量与发布](./07-phase-4-product-release.md) | P0 + P1、AC-001 至 AC-014 和发布门禁全部通过 |
+
+每个阶段必须以对应计划中的自动化门禁、真实 Finder/Cloudreve 证据和 exit report 为完成依据。仅代码合并、静态检查通过或部分 happy path 成功，不构成阶段完成。
+
 ### 阶段 0：协议与 File Provider Spike
 
 - 完成第 19 节全部 P0 门禁探测；
@@ -1255,7 +1267,7 @@ thumbnail
 - Keychain upload secret、part checkpoint、source fingerprint；
 - 冲突持久化和三种 P0 解决动作。
 
-退出标准：AC-003、AC-005、AC-006、AC-008、AC-010 通过故障注入。
+退出标准：AC-005、AC-008 完整通过；AC-003 本地到远端链路、AC-006 冲突引擎和 AC-010 写路径故障子场景通过。
 
 ### 阶段 3：SSE 与最终一致性
 
