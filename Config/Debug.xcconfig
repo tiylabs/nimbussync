@@ -1,11 +1,10 @@
-PRODUCT_BUNDLE_IDENTIFIER = com.cloudreve.mac
-PRODUCT_NAME = Cloudreve
+PRODUCT_BUNDLE_IDENTIFIER = ai.tiylabs.nimbussync
+PRODUCT_NAME = NimbusSync
 SWIFT_VERSION = 6.0
 MACOSX_DEPLOYMENT_TARGET = 13.0
 CODE_SIGN_IDENTITY = -
 CODE_SIGNING_REQUIRED = NO
 CODE_SIGNING_ALLOWED = NO
 DEVELOPMENT_TEAM =
-APP_GROUP_IDENTIFIER = group.com.cloudreve.mac
-KEYCHAIN_ACCESS_GROUP = $(AppIdentifierPrefix)com.cloudreve.mac
-
+APP_GROUP_IDENTIFIER = group.ai.tiylabs.nimbussync
+KEYCHAIN_ACCESS_GROUP = $(AppIdentifierPrefix)ai.tiylabs.nimbussync

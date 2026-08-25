@@ -234,7 +234,7 @@ public final class SQLiteStateStore: @unchecked Sendable {
             defer { sqlite3_finalize(statement) }
             guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
             let snapshotData = Data((columnString(statement, 9) ?? "{}").utf8)
-            return StoredDomain(identifier: columnString(statement, 0) ?? identifier, displayName: columnString(statement, 1) ?? "Cloudreve", origin: columnString(statement, 2) ?? "", accountID: columnString(statement, 3) ?? "", rootRemoteID: columnString(statement, 4) ?? "", rootURI: columnString(statement, 5) ?? "/", scopeKey: columnString(statement, 6) ?? "", status: DomainStatus(rawValue: columnString(statement, 7) ?? "initializing") ?? .initializing, secretReference: columnString(statement, 8) ?? "", capabilitySnapshot: (try? JSONDecoder().decode(CapabilitySnapshot.self, from: snapshotData)) ?? CapabilitySnapshot())
+			return StoredDomain(identifier: columnString(statement, 0) ?? identifier, displayName: columnString(statement, 1) ?? "NimbusSync", origin: columnString(statement, 2) ?? "", accountID: columnString(statement, 3) ?? "", rootRemoteID: columnString(statement, 4) ?? "", rootURI: columnString(statement, 5) ?? "/", scopeKey: columnString(statement, 6) ?? "", status: DomainStatus(rawValue: columnString(statement, 7) ?? "initializing") ?? .initializing, secretReference: columnString(statement, 8) ?? "", capabilitySnapshot: (try? JSONDecoder().decode(CapabilitySnapshot.self, from: snapshotData)) ?? CapabilitySnapshot())
         }
     }
 
@@ -245,7 +245,7 @@ public final class SQLiteStateStore: @unchecked Sendable {
             var domains: [StoredDomain] = []
             while sqlite3_step(statement) == SQLITE_ROW {
                 let snapshotData = Data((columnString(statement, 9) ?? "{}").utf8)
-                domains.append(StoredDomain(identifier: columnString(statement, 0) ?? "", displayName: columnString(statement, 1) ?? "Cloudreve", origin: columnString(statement, 2) ?? "", accountID: columnString(statement, 3) ?? "", rootRemoteID: columnString(statement, 4) ?? "", rootURI: columnString(statement, 5) ?? "/", scopeKey: columnString(statement, 6) ?? "", status: DomainStatus(rawValue: columnString(statement, 7) ?? "initializing") ?? .initializing, secretReference: columnString(statement, 8) ?? "", capabilitySnapshot: (try? JSONDecoder().decode(CapabilitySnapshot.self, from: snapshotData)) ?? CapabilitySnapshot()))
+				domains.append(StoredDomain(identifier: columnString(statement, 0) ?? "", displayName: columnString(statement, 1) ?? "NimbusSync", origin: columnString(statement, 2) ?? "", accountID: columnString(statement, 3) ?? "", rootRemoteID: columnString(statement, 4) ?? "", rootURI: columnString(statement, 5) ?? "/", scopeKey: columnString(statement, 6) ?? "", status: DomainStatus(rawValue: columnString(statement, 7) ?? "initializing") ?? .initializing, secretReference: columnString(statement, 8) ?? "", capabilitySnapshot: (try? JSONDecoder().decode(CapabilitySnapshot.self, from: snapshotData)) ?? CapabilitySnapshot()))
             }
             return domains
         }

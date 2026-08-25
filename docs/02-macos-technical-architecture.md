@@ -1,4 +1,4 @@
-# Cloudreve for macOS 技术选型与架构设计
+# NimbusSync 技术选型与架构设计
 
 > 文档状态：Architecture Baseline 1.3
 > 日期：2026-08-25  
@@ -8,7 +8,7 @@
 
 ## 1. 架构结论
 
-Cloudreve for macOS 采用原生多进程架构：
+NimbusSync 采用原生多进程架构，连接自托管 Cloudreve 服务端：
 
 - 使用 **Swift 6、SwiftUI 和少量 AppKit** 实现菜单栏、窗口、设置、通知和系统生命周期；
 - 使用 **`NSFileProviderReplicatedExtension`** 提供 Finder Domain、占位文件、按需下载、双向修改和空间释放；
@@ -102,9 +102,9 @@ Cloudreve for macOS 采用原生多进程架构：
 flowchart TB
     USER[用户]
     FINDER[Finder / macOS File Provider]
-    APP[CloudreveMac.app<br/>菜单栏 设置 SSE 校准 通知]
-    FP[CloudreveFileProvider.appex<br/>枚举 下载 写入 删除]
-    FPUI[CloudreveFileProviderUI.appex<br/>Finder 操作与交互]
+    APP[NimbusSync.app<br/>菜单栏 设置 SSE 校准 通知]
+    FP[NimbusSyncFileProvider.appex<br/>枚举 下载 写入 删除]
+    FPUI[NimbusSyncFileProviderUI.appex<br/>Finder 操作与交互]
     CORE[CloudreveCore.xcframework<br/>API 上传 加密 Store]
     REG[(registry.sqlite3)]
     DOMAIN[(Domain state.sqlite3)]
@@ -286,7 +286,7 @@ Keychain 使用 `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`。每个 Doma
 - 主应用设置 `LSUIElement`，默认不显示 Dock 图标；打开设置或冲突中心时激活并显示独立窗口；
 - 设置窗口使用 SwiftUI `Settings` 和 `NavigationSplitView`；
 - 添加网盘使用单独 `WindowGroup` 和显式状态机；
-- 冲突中心通过 `cloudreve-macos://conflict/<id>` deep link 定位；
+- 冲突中心通过 `nimbussync-macos://conflict/<id>` deep link 定位；
 - 主应用内 `EventCoordinator` 管理 SSE、周期 reconciliation、`signalEnumerator` 与通知；退出应用后这些增强能力暂停；
 - 任务取消通过 SQLite `cancel_requested` + Darwin signal 跨进程传播；它只取消当前 attempt，不把仍由系统持有的 dirty change 标记为已放弃；
 - 登录启动使用 `SMAppService.mainApp`，开关读取系统真实注册状态；
@@ -1107,9 +1107,9 @@ File Provider Info.plist 默认不声明 `NSExtensionFileProviderAppliesChangesA
 ### 17.3 发布物
 
 ```text
-CloudreveMac.app
-├── Contents/PlugIns/CloudreveFileProvider.appex
-└── Contents/PlugIns/CloudreveFileProviderUI.appex
+NimbusSync.app
+├── Contents/PlugIns/NimbusSyncFileProvider.appex
+└── Contents/PlugIns/NimbusSyncFileProviderUI.appex
 ```
 
 发布流程：Release 构建、单元与集成测试、codesign 深度校验、notary submit、staple、Gatekeeper 实机验证、生成 DMG、升级与卸载检查。

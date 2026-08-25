@@ -23,7 +23,7 @@ public protocol CredentialVault: Sendable {
 public enum CredentialVaultError: Error, Equatable { case unavailable, invalidData, duplicate, unexpectedStatus(OSStatus) }
 
 public enum KeychainAccessGroup {
-    public static func current(suffix: String = "com.cloudreve.mac") -> String? {
+    public static func current(suffix: String = "ai.tiylabs.nimbussync") -> String? {
         guard let task = SecTaskCreateFromSelf(nil), let value = SecTaskCopyValueForEntitlement(task, "keychain-access-groups" as CFString, nil) as? [String] else { return nil }
         return value.first { $0.hasSuffix(suffix) }
     }
@@ -49,7 +49,7 @@ public final class KeychainOpaqueSecretVault: OpaqueSecretVault, @unchecked Send
     public init(accessGroup: String? = nil) { self.accessGroup = accessGroup }
 
     public func readSecret(reference: String) throws -> String? {
-        var query: [CFString: Any] = [kSecClass: kSecClassGenericPassword, kSecAttrService: "CloudreveMac.TransferSecret", kSecAttrAccount: reference, kSecReturnData: true, kSecMatchLimit: kSecMatchLimitOne]
+        var query: [CFString: Any] = [kSecClass: kSecClassGenericPassword, kSecAttrService: "NimbusSync.TransferSecret", kSecAttrAccount: reference, kSecReturnData: true, kSecMatchLimit: kSecMatchLimitOne]
         if let accessGroup { query[kSecAttrAccessGroup] = accessGroup }
         var result: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
@@ -60,7 +60,7 @@ public final class KeychainOpaqueSecretVault: OpaqueSecretVault, @unchecked Send
     }
 
     public func writeSecret(_ secret: String, reference: String) throws {
-        var query: [CFString: Any] = [kSecClass: kSecClassGenericPassword, kSecAttrService: "CloudreveMac.TransferSecret", kSecAttrAccount: reference]
+        var query: [CFString: Any] = [kSecClass: kSecClassGenericPassword, kSecAttrService: "NimbusSync.TransferSecret", kSecAttrAccount: reference]
         if let accessGroup { query[kSecAttrAccessGroup] = accessGroup }
         let data = Data(secret.utf8)
         let attributes: [CFString: Any] = [kSecValueData: data, kSecAttrAccessible: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly]
@@ -74,7 +74,7 @@ public final class KeychainOpaqueSecretVault: OpaqueSecretVault, @unchecked Send
     }
 
     public func removeSecret(reference: String) throws {
-        var query: [CFString: Any] = [kSecClass: kSecClassGenericPassword, kSecAttrService: "CloudreveMac.TransferSecret", kSecAttrAccount: reference]
+        var query: [CFString: Any] = [kSecClass: kSecClassGenericPassword, kSecAttrService: "NimbusSync.TransferSecret", kSecAttrAccount: reference]
         if let accessGroup { query[kSecAttrAccessGroup] = accessGroup }
         let status = SecItemDelete(query as CFDictionary)
         guard status == errSecSuccess || status == errSecItemNotFound else { throw CredentialVaultError.unexpectedStatus(status) }
@@ -126,7 +126,7 @@ public final class KeychainCredentialVault: CredentialVault, @unchecked Sendable
     public init(accessGroup: String? = nil) { self.accessGroup = accessGroup }
 
     public func read(reference: String) throws -> Credential? {
-        var query: [CFString: Any] = [kSecClass: kSecClassGenericPassword, kSecAttrService: "CloudreveMac.Credential", kSecAttrAccount: reference, kSecReturnData: true, kSecMatchLimit: kSecMatchLimitOne]
+        var query: [CFString: Any] = [kSecClass: kSecClassGenericPassword, kSecAttrService: "NimbusSync.Credential", kSecAttrAccount: reference, kSecReturnData: true, kSecMatchLimit: kSecMatchLimitOne]
         if let accessGroup { query[kSecAttrAccessGroup] = accessGroup }
         var result: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
@@ -138,7 +138,7 @@ public final class KeychainCredentialVault: CredentialVault, @unchecked Sendable
 
     public func write(_ credential: Credential, reference: String) throws {
         let data = try JSONEncoder().encode(credential)
-        var query: [CFString: Any] = [kSecClass: kSecClassGenericPassword, kSecAttrService: "CloudreveMac.Credential", kSecAttrAccount: reference]
+        var query: [CFString: Any] = [kSecClass: kSecClassGenericPassword, kSecAttrService: "NimbusSync.Credential", kSecAttrAccount: reference]
         if let accessGroup { query[kSecAttrAccessGroup] = accessGroup }
         let attributes: [CFString: Any] = [kSecValueData: data, kSecAttrAccessible: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly]
         let updateStatus = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
@@ -152,7 +152,7 @@ public final class KeychainCredentialVault: CredentialVault, @unchecked Sendable
     }
 
     public func remove(reference: String) throws {
-        var query: [CFString: Any] = [kSecClass: kSecClassGenericPassword, kSecAttrService: "CloudreveMac.Credential", kSecAttrAccount: reference]
+        var query: [CFString: Any] = [kSecClass: kSecClassGenericPassword, kSecAttrService: "NimbusSync.Credential", kSecAttrAccount: reference]
         if let accessGroup { query[kSecAttrAccessGroup] = accessGroup }
         let status = SecItemDelete(query as CFDictionary)
         guard status == errSecSuccess || status == errSecItemNotFound else { throw CredentialVaultError.unexpectedStatus(status) }
@@ -168,12 +168,13 @@ public struct OAuthCallback: Equatable, Sendable {
 }
 
 public final class OAuthCoordinator: @unchecked Sendable {
+    public let redirectScheme: String
     public let redirectHost: String
     public let redirectPath: String
     private var expectedState: String?
     private let lock = NSLock()
 
-    public init(redirectHost: String = "oauth", redirectPath: String = "/callback") { self.redirectHost = redirectHost; self.redirectPath = redirectPath }
+    public init(redirectScheme: String = "nimbussync-macos", redirectHost: String = "oauth", redirectPath: String = "/callback") { self.redirectScheme = redirectScheme; self.redirectHost = redirectHost; self.redirectPath = redirectPath }
 
     public func begin() -> (state: String, verifier: String) {
         let state = randomToken()
@@ -187,7 +188,7 @@ public final class OAuthCoordinator: @unchecked Sendable {
     }
 
     public func validate(url: URL) throws -> OAuthCallback {
-        guard url.host == redirectHost, url.path == redirectPath, let components = URLComponents(url: url, resolvingAgainstBaseURL: false), let query = components.queryItems, let code = query.first(where: { $0.name == "code" })?.value, let state = query.first(where: { $0.name == "state" })?.value else { throw CoreFailure(code: .authentication, retryable: false, userActionRequired: true) }
+        guard url.scheme == redirectScheme, url.host == redirectHost, url.path == redirectPath, let components = URLComponents(url: url, resolvingAgainstBaseURL: false), let query = components.queryItems, let code = query.first(where: { $0.name == "code" })?.value, let state = query.first(where: { $0.name == "state" })?.value else { throw CoreFailure(code: .authentication, retryable: false, userActionRequired: true) }
         lock.lock(); let expected = expectedState; expectedState = nil; lock.unlock()
         guard expected == state else { throw CoreFailure(code: .authentication, retryable: false, userActionRequired: true) }
         return OAuthCallback(code: code, state: state, host: url.host ?? "", path: url.path)

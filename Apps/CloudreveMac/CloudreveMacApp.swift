@@ -13,7 +13,7 @@ struct CloudreveMacApp: App {
     @State private var conflicts: [ProductConflict] = []
 
     var body: some Scene {
-        MenuBarExtra("Cloudreve", systemImage: "externaldrive") {
+		MenuBarExtra("NimbusSync", systemImage: "externaldrive") {
             VStack(spacing: 0) {
                 MenuBarPopoverView(domains: domains, tasks: [])
                 Divider()
@@ -30,7 +30,7 @@ struct CloudreveMacApp: App {
             SettingsView(domains: domains)
         }
 
-        Window("Welcome to Cloudreve", id: "onboarding") {
+		Window("Welcome to NimbusSync", id: "onboarding") {
             OnboardingView { _ in }
         }
         .windowResizability(.contentSize)
@@ -57,7 +57,7 @@ private struct SettingsView: View {
                 Label("Diagnostics", systemImage: "stethoscope")
                 Label("About", systemImage: "info.circle")
             }
-            .navigationTitle("Cloudreve")
+			.navigationTitle("NimbusSync")
         } detail: {
             Form {
                 Section("Domains") {
@@ -67,12 +67,12 @@ private struct SettingsView: View {
                     }
                 }
                 Section("General") {
-                    Toggle("Launch Cloudreve at login", isOn: $launchAtLogin)
+					Toggle("Launch NimbusSync at login", isOn: $launchAtLogin)
                         .onReceive(Just(launchAtLogin).dropFirst()) { enabled in try? (enabled ? SMAppService.mainApp.register() : SMAppService.mainApp.unregister()) }
                     Toggle("Notifications", isOn: $notificationsEnabled)
                 }
                 Section("Support") {
-                    Text("Unsupported capabilities remain read-only until verified for this Cloudreve server and storage provider.").font(.caption).foregroundStyle(.secondary)
+					Text("Unsupported capabilities remain read-only until verified for this server and storage provider.").font(.caption).foregroundStyle(.secondary)
                 }
             }.formStyle(.grouped)
         }

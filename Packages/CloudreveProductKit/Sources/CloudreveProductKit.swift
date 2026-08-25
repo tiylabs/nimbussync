@@ -89,7 +89,7 @@ public actor ProductStore {
     private let registry: SQLiteStateStore?
     private let userDefaults: UserDefaults
     private let metrics: MetricsStore
-    private let notificationKey = "cloudreve.notification.preferences"
+    private let notificationKey = "nimbussync.notification.preferences"
 
     public init(registry: SQLiteStateStore? = nil, userDefaults: UserDefaults = .standard, metrics: MetricsStore = MetricsStore()) { self.registry = registry; self.userDefaults = userDefaults; self.metrics = metrics }
 
@@ -114,7 +114,7 @@ public actor ProductStore {
 public actor NotificationCoordinator {
     private let center: UNUserNotificationCenter
     private let userDefaults: UserDefaults
-    private let dedupeKey = "cloudreve.notification.dedupe"
+    private let dedupeKey = "nimbussync.notification.dedupe"
     private let preferences: ProductStore
 
     public init(center: UNUserNotificationCenter = .current(), userDefaults: UserDefaults = .standard, preferences: ProductStore) { self.center = center; self.userDefaults = userDefaults; self.preferences = preferences }
@@ -149,7 +149,7 @@ public enum DeepLinkDestination: Equatable, Sendable { case conflict(UUID), reau
 
 public enum DeepLinkRouter {
     public static func destination(url: URL) -> DeepLinkDestination? {
-        guard url.scheme == "cloudreve-macos" else { return nil }
+        guard url.scheme == "nimbussync-macos" else { return nil }
         let components = url.pathComponents.filter { $0 != "/" }
         guard let action = components.first else { return .settings }
         switch action {

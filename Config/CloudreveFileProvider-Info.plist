@@ -2,34 +2,54 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>CFBundleDisplayName</key><string>Cloudreve File Provider</string>
-	<key>CFBundlePackageType</key><string>XPC!</string>
-	<key>CFBundleShortVersionString</key><string>0.1.0</string>
-	<key>CFBundleVersion</key><string>1</string>
-	<key>NSExtension</key>
-	<dict>
-		<key>NSExtensionPointIdentifier</key><string>com.apple.fileprovider-nonui</string>
-		<key>NSExtensionPrincipalClass</key><string>$(PRODUCT_MODULE_NAME).FileProviderExtension</string>
-		<key>NSExtensionFileProviderDocumentGroup</key><string>$(APP_GROUP_IDENTIFIER)</string>
-		<key>NSExtensionFileProviderDownloadPipelineDepth</key><integer>2</integer>
-		<key>NSExtensionFileProviderMetadataOnlyUploadPipelineDepth</key><integer>2</integer>
-		<key>NSExtensionFileProviderActions</key>
-		<array>
-			<dict>
-				<key>Identifier</key><string>com.cloudreve.mac.check-for-updates</string>
-				<key>Title</key><string>Check for Updates</string>
-				<key>Predicate</key><string>TRUEPREDICATE</string>
-			</dict>
-		</array>
-		<key>NSFileProviderDecorations</key>
-		<array>
-			<dict>
-				<key>Identifier</key><string>com.cloudreve.mac.conflict</string>
-				<key>BadgeImageType</key><string>com.apple.icon-decoration.badge.exclamationmark</string>
-				<key>Label</key><string>Conflict</string>
-				<key>Category</key><string>Badge</string>
-			</dict>
-		</array>
-	</dict>
+    <key>CFBundleIdentifier</key>
+    <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+    <key>CFBundleDisplayName</key>
+    <string>NimbusSync File Provider</string>
+    <key>CFBundleName</key>
+    <string>NimbusSyncFileProvider</string>
+    <key>CFBundlePackageType</key>
+    <string>XPC!</string>
+    <key>CFBundleShortVersionString</key>
+    <string>0.1.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>NSExtension</key>
+    <dict>
+        <key>NSExtensionPointIdentifier</key>
+        <string>com.apple.fileprovider-nonui</string>
+        <key>NSExtensionPrincipalClass</key>
+        <string>$(PRODUCT_MODULE_NAME).FileProviderExtension</string>
+        <key>NSExtensionFileProviderDocumentGroup</key>
+        <string>$(APP_GROUP_IDENTIFIER)</string>
+        <key>NSExtensionFileProviderDownloadPipelineDepth</key>
+        <integer>2</integer>
+        <key>NSExtensionFileProviderMetadataOnlyUploadPipelineDepth</key>
+        <integer>2</integer>
+        <key>NSExtensionFileProviderActions</key>
+        <array>
+            <dict>
+                <key>Identifier</key>
+                <string>ai.tiylabs.nimbussync.check-for-updates</string>
+                <key>Title</key>
+                <string>Check for Updates</string>
+                <key>Predicate</key>
+                <string>TRUEPREDICATE</string>
+            </dict>
+        </array>
+        <key>NSFileProviderDecorations</key>
+        <array>
+            <dict>
+                <key>Identifier</key>
+                <string>ai.tiylabs.nimbussync.conflict</string>
+                <key>BadgeImageType</key>
+                <string>com.apple.icon-decoration.badge.exclamationmark</string>
+                <key>Label</key>
+                <string>Conflict</string>
+                <key>Category</key>
+                <string>Badge</string>
+            </dict>
+        </array>
+    </dict>
 </dict>
 </plist>

@@ -1,9 +1,9 @@
-# Cloudreve macOS 客户端产品需求文档
+# NimbusSync macOS 客户端产品需求文档
 
 > 文档类型：产品需求文档（PRD）  
 > 状态：Reviewed Draft 1.3
 > 日期：2026-08-25  
-> 目标产品暂定名：Cloudreve for macOS  
+> 目标产品名称：NimbusSync
 > 参考实现：[`cloudreve/desktop@7144740`](https://github.com/cloudreve/desktop/tree/71447408df6db38362703fbbb61dc534ea210470)  
 > 配套技术调研：[Cloudreve Desktop macOS 复刻方案调研](./00-macos-port-research.md)
 
@@ -22,7 +22,7 @@
 
 ## 2. 产品定义
 
-Cloudreve for macOS 是面向自托管 Cloudreve 用户的原生菜单栏与 Finder 云盘客户端。用户完成一次授权后，应能在 Finder 中浏览远端文件、按需下载、直接编辑，并让本地与 Cloudreve 自动保持一致。
+NimbusSync 是面向自托管 Cloudreve 用户的原生菜单栏与 Finder 云盘同步客户端。用户完成一次授权后，应能在 Finder 中浏览远端文件、按需下载、直接编辑，并让本地与 Cloudreve 自动保持一致。
 
 ### 2.1 核心价值
 
@@ -99,7 +99,7 @@ Windows Explorer
 
 布局自上而下为：
 
-1. Header：Cloudreve Logo、设置按钮；
+1. Header：NimbusSync Logo、设置按钮；
 2. Drive Chips：全部、各网盘、添加网盘；
 3. Task List：`同步中` 与 `最近` 两组；
 4. Footer：同步任务数量或“文件已是最新”。
@@ -135,7 +135,7 @@ url_input
 1. 输入 Cloudreve 站点 URL；
 2. 请求 `/api/v4/site/ping`，检查最低版本 `4.12.0`；
 3. 生成 PKCE，打开浏览器 OAuth；
-4. 通过 `cloudreve://` deep link 接收 code/state/远端路径/用户 ID；
+4. 通过 `nimbussync-macos://` deep link 接收 code/state/远端路径/用户 ID；
 5. 输入挂载名称并选择空的本地文件夹；
 6. 创建 Sync Root；
 7. 成功后打开本地云盘。
@@ -654,7 +654,7 @@ healthy
 | Reconciling | 正在检查更新 | 查看状态，不承诺已同步 |
 | Offline | 离线，等待网络 | 重试 |
 | Event degraded | 实时更新不可用，正在定期检查 | 立即检查、查看诊断 |
-| App not running | Finder 可用，实时更新已暂停 | 打开 Cloudreve |
+| App not running | Finder 可用，实时更新已暂停 | 打开 NimbusSync |
 | Auth expired | 需要重新授权 | 重新授权 |
 | Root unavailable | 远端根不可用 | 检查权限、重新选择或移除网盘 |
 | Scope conflict | 网盘范围发生重叠 | 选择保留一个范围或调整远端目录 |
@@ -989,7 +989,7 @@ queued → running → succeeded
 | 最低 macOS 版本 | macOS 13 | File Provider Spike 后 |
 | Intel 支持 | universal2 支持 | 首个 Beta 前 |
 | 最低 Cloudreve 版本 | 暂沿用 4.12.0 | 协议验证后 |
-| 应用名称与图标 | 暂用工作名，避免未授权品牌资产 | 首个公开构建前 |
+| 应用名称与图标 | NimbusSync；使用独立品牌资产，避免复用服务端品牌资产 | 首个公开构建前 |
 | App Store 或站外分发 | Developer ID 站外分发优先 | 发布工程开始前 |
 | 自动更新方案 | 1.0 后或 Beta 冻结前决定 | Beta 前 |
 | partial fetch | P2；完整下载先行 | 大文件 Spike 后 |

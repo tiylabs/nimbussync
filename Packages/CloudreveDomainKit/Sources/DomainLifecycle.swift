@@ -149,7 +149,7 @@ public struct DomainRemovalPolicy: Sendable {
 }
 
 public enum AppGroupPaths {
-    public static let identifier = "group.com.cloudreve.mac"
+    public static let identifier = "group.ai.tiylabs.nimbussync"
 
     public static func root(fileManager: FileManager = .default) -> URL? {
         fileManager.containerURL(forSecurityApplicationGroupIdentifier: identifier)

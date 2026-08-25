@@ -449,8 +449,8 @@ Cloudreve 常用于私有网络，可能采用自签名证书或私有 CA。若 
 Xcode 工程至少包含：
 
 ```text
-CloudreveMac.app
-CloudreveFileProvider.appex
+NimbusSync.app
+NimbusSyncFileProvider.appex
 CloudreveLoginItem.app       # 可选
 CloudreveCore.xcframework
 ```
@@ -559,7 +559,7 @@ Windows 版通过 MSIX 注册 Cloud Files、COM、Toast 和 StartupTask，参见
 | Rust TLS 与系统信任不一致 | 中高 | 采用系统根证书，私有 CA 走显式信任流程 |
 | Finder Pin/Evict 与 Windows 语义不完全一致 | 中 | Spike 实机验证并在产品文案中体现平台差异 |
 | File Provider API 跨 macOS 版本行为变化 | 中 | 明确最低版本并维护 OS 测试矩阵 |
-| 许可或官方品牌使用边界不清 | 中 | 保留 MIT 声明，独立核对 Community/Pro 和商标条款 |
+| 许可或官方品牌使用边界不清 | 中 | 按 Apache 2.0 和第三方许可要求维护 LICENSE、NOTICE 与 SBOM，独立核对 Community/Pro 和商标条款 |
 
 ## 16. 发布验收标准
 
@@ -578,13 +578,14 @@ Windows 版通过 MSIX 注册 Cloud Files、COM、Toast 和 StartupTask，参见
 
 ## 17. 许可边界
 
-参考桌面项目采用 MIT License，参见 [`LICENSE`](https://github.com/cloudreve/desktop/blob/71447408df6db38362703fbbb61dc534ea210470/LICENSE)。目标项目当前采用 GPLv3。
+参考桌面项目采用 MIT License，参见 [`LICENSE`](https://github.com/cloudreve/desktop/blob/71447408df6db38362703fbbb61dc534ea210470/LICENSE)。本项目自行开发内容的项目级默认许可为 Apache License 2.0，准据文本为仓库根目录的 [`LICENSE`](../LICENSE)；Rust workspace 的 package metadata 也声明为 `Apache-2.0`。
 
-MIT 代码通常可以并入 GPLv3 项目，但应：
+第三方代码、依赖和参考实现不会因为被本项目引用而自动转为 Apache 2.0。引入或分发这些内容时应：
 
-- 保留原始 MIT copyright 和许可文本；
-- 标记直接复制或修改的文件；
-- 不把 Cloudreve 官方图标、名称或其他品牌资产自动视为 MIT 代码的一部分；
+- 保留上游 MIT copyright 和许可文本；
+- 对 Apache 2.0 或其他第三方代码遵守其原始许可，并保留适用的 copyright、专利、商标、归属和 NOTICE 声明；
+- 标记直接复制或修改的文件，并在发布前生成与 lockfile 和产物一致的 SBOM/许可证清单；
+- 不把 Cloudreve 官方图标、名称或其他品牌资产自动视为 MIT、Apache 2.0 或其他开源许可的一部分；
 - 单独核对 Cloudreve Community、Pro 功能和官方客户端商业条款；
 - 商业发布前取得项目方或法律顾问对具体版本和分发模式的确认。
 

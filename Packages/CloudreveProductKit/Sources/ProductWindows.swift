@@ -7,7 +7,7 @@ public struct OnboardingView: View {
     public init(onContinue: @escaping (String) -> Void) { self.onContinue = onContinue }
     public var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Label("Cloudreve", systemImage: "externaldrive").font(.title2)
+			Label("NimbusSync", systemImage: "externaldrive").font(.title2)
             Text("Connect a Cloudreve domain to use it in Finder.").foregroundStyle(.secondary)
             TextField("Cloudreve URL", text: $origin).textFieldStyle(.roundedBorder)
             HStack { Spacer(); Button("Continue") { onContinue(origin) }.buttonStyle(.borderedProminent).disabled(origin.isEmpty) }
@@ -59,4 +59,3 @@ public struct ExclusionRulesView: View {
         }.padding(20)
     }
 }
-

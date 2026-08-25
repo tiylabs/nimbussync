@@ -47,7 +47,7 @@ public struct MenuBarPopoverView: View {
     public var body: some View {
         VStack(alignment: .leading, spacing: CloudreveDesignTokens.spacing12) {
             HStack {
-                Text("Cloudreve").font(.headline)
+				Text("NimbusSync").font(.headline)
                 Spacer()
                 Button(action: {}) { Image(systemName: "gearshape") }.buttonStyle(.borderless).accessibilityLabel(Text("Settings"))
                 Button(action: {}) { Image(systemName: "plus") }.buttonStyle(.borderless).accessibilityLabel(Text("Add domain"))

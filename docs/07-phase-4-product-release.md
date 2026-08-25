@@ -149,7 +149,7 @@ Domain provisioning/removal 进度来自持久 saga。关闭设置不退出同�
 4. 覆盖远端使用 resolution intent，等待新 callback URL，不从旧路径上传；
 5. 保留两个版本展示最终副本名和 collision 处理；
 6. 远端再次变化时保持冲突，不假成功；
-7. deep link `cloudreve-macos://conflict/<opaque-id>` 只携带本地 ID；
+7. deep link `nimbussync-macos://conflict/<opaque-id>` 只携带本地 ID；
 8. Finder action 和通知只导航，不直接执行不可逆覆盖。
 
 ### 6.5 工作包 P4-W5：Finder 增强

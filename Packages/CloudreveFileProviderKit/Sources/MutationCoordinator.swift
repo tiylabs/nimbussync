@@ -170,6 +170,6 @@ public final class ConflictResolutionService: @unchecked Sendable {
 
     private func uniqueName(_ name: String) -> String {
         let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
-        return "\(name) (Cloudreve conflict \(stamp))"
+		return "\(name) (NimbusSync conflict \(stamp))"
     }
 }

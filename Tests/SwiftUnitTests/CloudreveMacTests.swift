@@ -111,9 +111,11 @@ final class CloudreveMacTests: XCTestCase {
     func testOAuthStateIsSingleUse() throws {
         let coordinator = OAuthCoordinator()
         let state = coordinator.begin().state
-        let url = URL(string: "cloudreve-macos://oauth/callback?code=abc&state=\(state)")!
+        let url = URL(string: "nimbussync-macos://oauth/callback?code=abc&state=\(state)")!
         XCTAssertEqual(try coordinator.validate(url: url).code, "abc")
         XCTAssertThrowsError(try coordinator.validate(url: url))
+        let oldSchemeURL = URL(string: "cloudreve-macos://oauth/callback?code=abc&state=\(state)")!
+        XCTAssertThrowsError(try coordinator.validate(url: oldSchemeURL))
         XCTAssertFalse(coordinator.pkceChallenge(verifier: "verifier").contains("="))
     }
 
@@ -270,8 +272,9 @@ final class CloudreveMacTests: XCTestCase {
         XCTAssertTrue(rules.matches(relativePath: "build/output.o"))
         XCTAssertTrue(rules.matches(relativePath: "notes.tmp"))
         XCTAssertFalse(rules.matches(relativePath: "folder/notes.txt"))
-        XCTAssertNil(DeepLinkRouter.destination(url: URL(string: "cloudreve-macos://conflict/not-an-id")!))
-        XCTAssertEqual(DeepLinkRouter.destination(url: URL(string: "cloudreve-macos://settings")!), .settings)
+        XCTAssertNil(DeepLinkRouter.destination(url: URL(string: "nimbussync-macos://conflict/not-an-id")!))
+        XCTAssertEqual(DeepLinkRouter.destination(url: URL(string: "nimbussync-macos://settings")!), .settings)
+        XCTAssertNil(DeepLinkRouter.destination(url: URL(string: "cloudreve-macos://settings")!))
     }
 
     func testProvisioningRecoveryAndRemovalDefaultToFailClosed() {

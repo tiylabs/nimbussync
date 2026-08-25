@@ -2,19 +2,19 @@
   "version": "1.0",
   "sourceLanguage": "en",
   "strings": {
-    "Cloudreve": {
+    "NimbusSync": {
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Cloudreve" } },
-        "zh-Hans": { "stringUnit": { "state": "translated", "value": "Cloudreve" } },
-        "zh-Hant": { "stringUnit": { "state": "translated", "value": "Cloudreve" } },
-        "ja": { "stringUnit": { "state": "translated", "value": "Cloudreve" } },
-        "de": { "stringUnit": { "state": "translated", "value": "Cloudreve" } },
-        "fr": { "stringUnit": { "state": "translated", "value": "Cloudreve" } },
-        "es": { "stringUnit": { "state": "translated", "value": "Cloudreve" } },
-        "ko": { "stringUnit": { "state": "translated", "value": "Cloudreve" } },
-        "ru": { "stringUnit": { "state": "translated", "value": "Cloudreve" } },
-        "pl": { "stringUnit": { "state": "translated", "value": "Cloudreve" } },
-        "it": { "stringUnit": { "state": "translated", "value": "Cloudreve" } }
+        "en": { "stringUnit": { "state": "translated", "value": "NimbusSync" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "NimbusSync" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "NimbusSync" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "NimbusSync" } },
+        "de": { "stringUnit": { "state": "translated", "value": "NimbusSync" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "NimbusSync" } },
+        "es": { "stringUnit": { "state": "translated", "value": "NimbusSync" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "NimbusSync" } },
+        "ru": { "stringUnit": { "state": "translated", "value": "NimbusSync" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "NimbusSync" } },
+        "it": { "stringUnit": { "state": "translated", "value": "NimbusSync" } }
       }
     },
     "No domains": {

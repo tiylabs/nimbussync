@@ -36,7 +36,7 @@ public final class CloudreveFileProviderItem: NSObject, NSFileProviderItem, NSFi
         self.model = model
         self.itemIdentifier = NSFileProviderItemIdentifier(model.itemIdentifier == NSFileProviderItemIdentifier.rootContainer.rawValue ? model.itemIdentifier : model.itemIdentifier)
         self.parentItemIdentifier = NSFileProviderItemIdentifier(model.parentIdentifier ?? NSFileProviderItemIdentifier.rootContainer.rawValue)
-        self.filename = model.name.isEmpty ? "Cloudreve" : model.name
+		self.filename = model.name.isEmpty ? "NimbusSync" : model.name
         self.contentType = UTType(model.contentType) ?? (model.kind == .folder ? .folder : .data)
         self.documentSize = model.kind == .folder ? nil : NSNumber(value: model.size)
         self.childItemCount = model.kind == .folder ? nil : nil
@@ -262,7 +262,7 @@ open class CloudreveFileProviderExtension: NSObject, NSFileProviderReplicatedExt
         do {
             let manager = NSFileProviderManager(for: domain)
             guard let directory = try manager?.temporaryDirectoryURL() else { throw CoreFailure(code: .network, retryable: true) }
-            let url = directory.appendingPathComponent("cloudreve-\(UUID().uuidString).tmp")
+			let url = directory.appendingPathComponent("nimbussync-\(UUID().uuidString).tmp")
             guard FileManager.default.createFile(atPath: url.path, contents: nil) else { throw CoreFailure(code: .network, retryable: true) }
             let item = try backend.fetchContent(identifier: itemIdentifier.rawValue, expectedVersion: requestedVersion?.contentVersion, to: url)
             completionHandler(url, CloudreveFileProviderItem(model: item), nil)
@@ -336,7 +336,7 @@ open class CloudreveFileProviderExtension: NSObject, NSFileProviderReplicatedExt
 
     public func performAction(identifier actionIdentifier: NSFileProviderExtensionActionIdentifier, onItemsWithIdentifiers itemIdentifiers: [NSFileProviderItemIdentifier], completionHandler: @escaping (Error?) -> Void) -> Progress {
         let progress = Progress(totalUnitCount: 1)
-        guard actionIdentifier.rawValue == "com.cloudreve.mac.check-for-updates" else { completionHandler(FileProviderErrorMapper.map(CoreFailure(code: .unsupportedMetadata, retryable: false))); return progress }
+		guard actionIdentifier.rawValue == "ai.tiylabs.nimbussync.check-for-updates" else { completionHandler(FileProviderErrorMapper.map(CoreFailure(code: .unsupportedMetadata, retryable: false))); return progress }
         do {
             guard let store else { throw CoreFailure(code: .database, retryable: false) }
             let scope = itemIdentifiers.first?.rawValue ?? NSFileProviderItemIdentifier.rootContainer.rawValue
