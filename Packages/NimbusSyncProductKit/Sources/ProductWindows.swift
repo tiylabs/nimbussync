@@ -4,6 +4,7 @@ import CloudreveDomainKit
 
 public struct OnboardingView: View {
     @State private var origin = ""
+    @FocusState private var originFieldIsFocused: Bool
     public let onContinue: (String) -> Void
     public let onCancel: () -> Void
     public let isWorking: Bool
@@ -13,7 +14,9 @@ public struct OnboardingView: View {
         VStack(alignment: .leading, spacing: 16) {
 			Label("NimbusSync", systemImage: "externaldrive").font(.title2)
             Text("Connect a Cloudreve domain to use it in Finder.").foregroundStyle(.secondary)
-            TextField("Cloudreve URL", text: $origin).textFieldStyle(.roundedBorder)
+            TextField("Cloudreve URL", text: $origin)
+                .textFieldStyle(.roundedBorder)
+                .focused($originFieldIsFocused)
             if let errorMessage { Text(errorMessage).foregroundStyle(.red).textSelection(.enabled) }
             HStack {
                 Spacer()
@@ -27,6 +30,7 @@ public struct OnboardingView: View {
         .padding(24)
         .frame(width: 480)
         .accessibilityElement(children: .contain)
+        .onAppear { originFieldIsFocused = true }
     }
 }
 

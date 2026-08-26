@@ -75,7 +75,21 @@ public struct MenuBarPopoverView: View {
             HStack {
 				Text("NimbusSync").font(.headline)
                 Spacer()
-                Button(action: onOpenSettings) { Image(systemName: "gearshape") }.buttonStyle(.borderless).accessibilityLabel(Text("Settings"))
+                if #available(macOS 14.0, *) {
+                    SettingsLink {
+                        Image(systemName: "gearshape")
+                    }
+                    .buttonStyle(.borderless)
+                    .accessibilityLabel(Text("Settings"))
+                    .help("Settings")
+                } else {
+                    Button(action: onOpenSettings) {
+                        Image(systemName: "gearshape")
+                    }
+                    .buttonStyle(.borderless)
+                    .accessibilityLabel(Text("Settings"))
+                    .help("Settings")
+                }
                 Button(action: onAddDomain) { Image(systemName: "plus") }.buttonStyle(.borderless).accessibilityLabel(Text("Add domain"))
             }
             if domains.isEmpty {

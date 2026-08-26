@@ -2,6 +2,7 @@ import Foundation
 import Security
 import Darwin
 import AppKit
+import AuthenticationServices
 import CryptoKit
 import OSLog
 import CloudreveDomainKit
@@ -252,8 +253,13 @@ public enum OAuthAuthorizationSessionError: Error, Equatable, LocalizedError {
     }
 }
 
+private struct OAuthWebAuthenticationCallback: Sendable {
+    let url: URL?
+    let wasCancelled: Bool
+}
+
 @MainActor
-public final class OAuthAuthorizationSession {
+public final class OAuthAuthorizationSession: NSObject, ASWebAuthenticationPresentationContextProviding {
     private struct PendingAuthorization {
         let correlation: String
         let verifier: String
@@ -262,12 +268,17 @@ public final class OAuthAuthorizationSession {
 
     private let coordinator: OAuthCoordinator
     private let configuration: CloudreveOAuthConfiguration
-    private let openURL: @MainActor @Sendable (URL) -> Bool
+    private let openURL: (@MainActor @Sendable (URL) -> Bool)?
     private let logger = Logger(subsystem: "ai.tiy.nimbussync", category: "oauth")
     private var pending: PendingAuthorization?
+    private var webAuthenticationSession: ASWebAuthenticationSession?
+    private lazy var fallbackPresentationAnchor = NSWindow()
 
-    public init(coordinator: OAuthCoordinator = OAuthCoordinator(), configuration: CloudreveOAuthConfiguration = CloudreveOAuthConfiguration(), openURL: @escaping @MainActor @Sendable (URL) -> Bool = { NSWorkspace.shared.open($0) }) {
-        self.coordinator = coordinator; self.configuration = configuration; self.openURL = openURL
+    public init(coordinator: OAuthCoordinator = OAuthCoordinator(), configuration: CloudreveOAuthConfiguration = CloudreveOAuthConfiguration(), openURL: (@MainActor @Sendable (URL) -> Bool)? = nil) {
+        self.coordinator = coordinator
+        self.configuration = configuration
+        self.openURL = openURL
+        super.init()
     }
 
     public func authorize(origin: URL, correlationID: UUID = UUID()) async throws -> OAuthAuthorizationResult {
@@ -282,14 +293,67 @@ public final class OAuthAuthorizationSession {
         logger.info("[\(correlation, privacy: .public)] oauth.authorization.started presentation=external_browser origin_scheme=\(originScheme, privacy: .public) callback_scheme=\(callbackScheme, privacy: .public) callback_host=\(callbackHost, privacy: .public) callback_path=\(callbackPath, privacy: .public)")
         return try await withCheckedThrowingContinuation { continuation in
             pending = PendingAuthorization(correlation: correlation, verifier: transaction.verifier, continuation: continuation)
-            guard openURL(url) else {
-                pending = nil
-                logger.error("[\(correlation, privacy: .public)] oauth.authorization.failed_to_start")
-                continuation.resume(throwing: OAuthAuthorizationSessionError.browserOpenFailed)
-                return
+            if let openURL {
+                guard openURL(url) else {
+                    pending = nil
+                    logger.error("[\(correlation, privacy: .public)] oauth.authorization.failed_to_start")
+                    continuation.resume(throwing: OAuthAuthorizationSessionError.browserOpenFailed)
+                    return
+                }
+            } else {
+                let session = ASWebAuthenticationSession(
+                    url: url,
+                    callbackURLScheme: callbackScheme,
+                    completionHandler: Self.makeCompletionHandler(owner: self)
+                )
+                session.presentationContextProvider = self
+                session.prefersEphemeralWebBrowserSession = false
+                webAuthenticationSession = session
+                guard session.start() else {
+                    webAuthenticationSession = nil
+                    pending = nil
+                    logger.error("[\(correlation, privacy: .public)] oauth.authorization.failed_to_start")
+                    continuation.resume(throwing: OAuthAuthorizationSessionError.browserOpenFailed)
+                    return
+                }
             }
             logger.info("[\(correlation, privacy: .public)] oauth.authorization.waiting_for_callback expected_scheme=\(callbackScheme, privacy: .public)")
         }
+    }
+
+    public func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
+        NSApplication.shared.keyWindow
+            ?? NSApplication.shared.windows.first(where: \.isVisible)
+            ?? fallbackPresentationAnchor
+    }
+
+    nonisolated private static func makeCompletionHandler(owner: OAuthAuthorizationSession) -> ASWebAuthenticationSession.CompletionHandler {
+        { [weak owner] callbackURL, error in
+            let callback = OAuthWebAuthenticationCallback(
+                url: callbackURL,
+                wasCancelled: (error as? ASWebAuthenticationSessionError)?.code == .canceledLogin
+            )
+            Task { @MainActor [weak owner, callback] in
+                owner?.completeWebAuthentication(callback)
+            }
+        }
+    }
+
+    private func completeWebAuthentication(_ callback: OAuthWebAuthenticationCallback) {
+        if let url = callback.url {
+            _ = receiveCallback(url)
+        } else {
+            webAuthenticationSession = nil
+            failPendingAuthorization(wasCancelled: callback.wasCancelled)
+        }
+    }
+
+    private func failPendingAuthorization(wasCancelled: Bool) {
+        guard let pending else { return }
+        self.pending = nil
+        let mappedError: OAuthAuthorizationSessionError = wasCancelled ? .cancelled : .browserOpenFailed
+        logger.error("[\(pending.correlation, privacy: .public)] oauth.authorization.browser_session_failed")
+        pending.continuation.resume(throwing: mappedError)
     }
 
     @discardableResult
@@ -301,6 +365,7 @@ public final class OAuthAuthorizationSession {
         }
 
         self.pending = nil
+        webAuthenticationSession = nil
         let actualScheme = url.scheme ?? "missing"
         let actualHost = url.host ?? "missing"
         logger.info("[\(pending.correlation, privacy: .public)] oauth.callback.received scheme=\(actualScheme, privacy: .public) host=\(actualHost, privacy: .public) path=\(url.path, privacy: .public)")
@@ -319,6 +384,9 @@ public final class OAuthAuthorizationSession {
     public func cancel() {
         guard let pending else { return }
         self.pending = nil
+        let session = webAuthenticationSession
+        webAuthenticationSession = nil
+        session?.cancel()
         logger.info("[\(pending.correlation, privacy: .public)] oauth.authorization.cancel_requested")
         pending.continuation.resume(throwing: OAuthAuthorizationSessionError.cancelled)
     }
