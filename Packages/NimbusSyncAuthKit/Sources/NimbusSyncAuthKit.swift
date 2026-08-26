@@ -24,7 +24,7 @@ public protocol CredentialVault: Sendable {
 public enum CredentialVaultError: Error, Equatable { case unavailable, invalidData, duplicate, unexpectedStatus(OSStatus) }
 
 public enum KeychainAccessGroup {
-    public static func current(suffix: String = "ai.tiylabs.nimbussync") -> String? {
+    public static func current(suffix: String = "ai.tiy.nimbussync") -> String? {
         guard let task = SecTaskCreateFromSelf(nil), let value = SecTaskCopyValueForEntitlement(task, "keychain-access-groups" as CFString, nil) as? [String] else { return nil }
         return value.first { $0.hasSuffix(suffix) }
     }
@@ -263,7 +263,7 @@ public final class OAuthAuthorizationSession {
     private let coordinator: OAuthCoordinator
     private let configuration: CloudreveOAuthConfiguration
     private let openURL: @MainActor @Sendable (URL) -> Bool
-    private let logger = Logger(subsystem: "ai.tiylabs.nimbussync", category: "oauth")
+    private let logger = Logger(subsystem: "ai.tiy.nimbussync", category: "oauth")
     private var pending: PendingAuthorization?
 
     public init(coordinator: OAuthCoordinator = OAuthCoordinator(), configuration: CloudreveOAuthConfiguration = CloudreveOAuthConfiguration(), openURL: @escaping @MainActor @Sendable (URL) -> Bool = { NSWorkspace.shared.open($0) }) {
@@ -327,7 +327,7 @@ public final class OAuthAuthorizationSession {
 public final class OAuthTokenExchange: @unchecked Sendable {
     private let session: URLSession
     private let configuration: CloudreveOAuthConfiguration
-    private let logger = Logger(subsystem: "ai.tiylabs.nimbussync", category: "oauth")
+    private let logger = Logger(subsystem: "ai.tiy.nimbussync", category: "oauth")
     public init(session: URLSession? = nil, configuration: CloudreveOAuthConfiguration = CloudreveOAuthConfiguration()) {
         if let session { self.session = session }
         else { self.session = URLSession(configuration: .ephemeral, delegate: SameOriginRedirectPolicy(), delegateQueue: nil) }

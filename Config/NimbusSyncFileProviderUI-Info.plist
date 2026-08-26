@@ -24,7 +24,7 @@
         <array>
             <dict>
                 <key>Identifier</key>
-                <string>ai.tiylabs.nimbussync.open-in-nimbussync</string>
+                <string>ai.tiy.nimbussync.open-in-nimbussync</string>
                 <key>Title</key>
                 <string>Open in NimbusSync</string>
                 <key>Predicate</key>
@@ -32,7 +32,7 @@
             </dict>
             <dict>
                 <key>Identifier</key>
-                <string>ai.tiylabs.nimbussync.resolve-conflict</string>
+                <string>ai.tiy.nimbussync.resolve-conflict</string>
                 <key>Title</key>
                 <string>Resolve Conflict</string>
                 <key>Predicate</key>

@@ -11,6 +11,6 @@ ARCHIVE="$ROOT/Dist/NimbusSync-$VERSION.zip"
 shasum -a 256 -c "$ARCHIVE.sha256"
 unzip -q -l "$ARCHIVE" | rg 'NimbusSync\.app/Contents/PlugIns/NimbusSyncFileProvider\.appex|NimbusSync\.app/Contents/PlugIns/NimbusSyncFileProviderUI\.appex|NimbusSync\.app/Contents/Info\.plist'
 if [ "${REQUIRE_SIGNED_RELEASE:-${NIMBUSSYNC_REQUIRE_SIGNED_RELEASE:-0}}" = 1 ]; then
-    codesign --verify --deep --strict "$ROOT/Dist/NimbusSync-$VERSION.app"
-    spctl --assess --type execute "$ROOT/Dist/NimbusSync-$VERSION.app"
+    codesign --verify --deep --strict "$ROOT/Dist/NimbusSync.app"
+    spctl --assess --type execute "$ROOT/Dist/NimbusSync.app"
 fi

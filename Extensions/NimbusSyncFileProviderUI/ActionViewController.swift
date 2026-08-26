@@ -4,7 +4,7 @@ import FileProviderUI
 final class ActionViewController: FPUIActionExtensionViewController {
     override func prepare(forAction actionIdentifier: String, itemIdentifiers: [NSFileProviderItemIdentifier]) {
 		let itemIdentifier = itemIdentifiers.first?.rawValue ?? ""
-		guard ["ai.tiylabs.nimbussync.open-in-nimbussync", "ai.tiylabs.nimbussync.resolve-conflict"].contains(actionIdentifier), itemIdentifier.hasPrefix("cri-"), itemIdentifier.count == 40 else {
+		guard ["ai.tiy.nimbussync.open-in-nimbussync", "ai.tiy.nimbussync.resolve-conflict"].contains(actionIdentifier), itemIdentifier.hasPrefix("cri-"), itemIdentifier.count == 40 else {
 			extensionContext.cancelRequest(withError: NSError(domain: NSFileProviderErrorDomain, code: NSFileProviderError.noSuchItem.rawValue))
 			return
 		}
@@ -14,7 +14,7 @@ final class ActionViewController: FPUIActionExtensionViewController {
         let view = NSView(frame: NSRect(x: 0, y: 0, width: 340, height: 80))
         view.addSubview(label)
         self.view = view
-		let destination = actionIdentifier == "ai.tiylabs.nimbussync.resolve-conflict" ? "conflict-item" : "item"
+		let destination = actionIdentifier == "ai.tiy.nimbussync.resolve-conflict" ? "conflict-item" : "item"
 		let url = URL(string: "nimbussync://\(destination)/\(itemIdentifier)")!
 		extensionContext.open(url) { [weak self] _ in self?.extensionContext.completeRequest() }
     }

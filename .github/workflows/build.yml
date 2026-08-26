@@ -132,7 +132,7 @@ jobs:
           DIST_DIR: ${{ runner.temp }}/nimbussync-release/Dist
           VERSION: ${{ inputs.version }}
           DEVELOPMENT_TEAM: ${{ secrets.APPLE_TEAM_ID }}
-          APP_GROUP_IDENTIFIER: ${{ vars.NIMBUSSYNC_APP_GROUP_IDENTIFIER || 'group.ai.tiylabs.nimbussync' }}
+          APP_GROUP_IDENTIFIER: ${{ vars.NIMBUSSYNC_APP_GROUP_IDENTIFIER || 'group.ai.tiy.nimbussync' }}
         run: Scripts/ci/build-app.sh
 
       - name: Run repository verification

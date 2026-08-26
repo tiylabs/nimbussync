@@ -242,7 +242,7 @@ private final class NimbusSyncAppState: ObservableObject {
     private let registry: SQLiteStateStore?
     private let productStore: ProductStore
     private let oauth = OAuthAuthorizationSession()
-    private let oauthLogger = Logger(subsystem: "ai.tiylabs.nimbussync", category: "oauth")
+    private let oauthLogger = Logger(subsystem: "ai.tiy.nimbussync", category: "oauth")
     private let heartbeat: HeartbeatCoordinator
     private let notifications: NotificationCoordinator
     private var started = false

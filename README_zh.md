@@ -227,7 +227,7 @@ BUILD_ROOT=/tmp/nimbussync-tests Scripts/ci/test.sh
 
 ```text
 .build/ci/derived/Build/Products/Debug/NimbusSync.app
-Dist/NimbusSync-0.1.0.app
+Dist/NimbusSync.app
 Dist/NimbusSync-0.1.0.zip
 Dist/NimbusSync-0.1.0.zip.sha256
 ```
@@ -259,7 +259,7 @@ Scripts/ci/build-app.sh
 | `NIMBUSSYNC_APP_PROFILE` | 是 | App profile UUID |
 | `NIMBUSSYNC_FILE_PROVIDER_PROFILE` | 是 | File Provider profile UUID |
 | `NIMBUSSYNC_FILE_PROVIDER_UI_PROFILE` | 是 | File Provider UI profile UUID |
-| `APP_GROUP_IDENTIFIER` | 否 | 默认 `group.ai.tiylabs.nimbussync` |
+| `APP_GROUP_IDENTIFIER` | 否 | 默认 `group.ai.tiy.nimbussync` |
 | `BUILD_ROOT`/`DIST_DIR`/`VERSION` | 否 | 构建目录、输出目录和 artifact 版本 |
 
 这个模式不会替你导入证书或 profile；GitHub Actions 使用的
@@ -305,7 +305,7 @@ NIMBUSSYNC_DEVELOPMENT_TEAM=<TEAM_ID> NIMBUSSYNC_OPEN_APP=1 \
 ```
 
 脚本使用 `NimbusSync` Scheme，允许 Xcode 更新 provisioning profile，并校验主 App、
-两个扩展、Team ID、`group.ai.tiylabs.nimbussync` entitlement 和 File Provider document group。
+两个扩展、Team ID、`group.ai.tiy.nimbussync` entitlement 和 File Provider document group。
 Team ID 不写入仓库。
 
 开发签名脚本的环境变量：
@@ -315,7 +315,7 @@ Team ID 不写入仓库。
 | `NIMBUSSYNC_DEVELOPMENT_TEAM` | 是 | Apple Developer Team ID；也可以作为第一个位置参数传入 |
 | `NIMBUSSYNC_SIGNED_BUILD_ROOT` | 否 | 默认 `$PWD/.build/xcode-signed` |
 | `NIMBUSSYNC_ARCH` | 否 | 默认当前机器架构，支持 `arm64` 或 `x86_64` |
-| `NIMBUSSYNC_APP_GROUP_IDENTIFIER` | 否 | 默认 `group.ai.tiylabs.nimbussync` |
+| `NIMBUSSYNC_APP_GROUP_IDENTIFIER` | 否 | 默认 `group.ai.tiy.nimbussync` |
 | `NIMBUSSYNC_ALLOW_DEVICE_REGISTRATION` | 否 | 设置为 `1` 才传递 `-allowProvisioningDeviceRegistration` |
 | `NIMBUSSYNC_OPEN_APP` | 否 | 设置为 `1`，签名校验后自动打开 App |
 
@@ -351,13 +351,13 @@ GitHub Secrets：
 | `APPLE_CERTIFICATE_BASE64` | `.p12` 证书的 base64 内容，包含私钥 |
 | `APPLE_CERTIFICATE_PASSWORD` | `.p12` 导出密码 |
 | `APPLE_SIGNING_IDENTITY` | 完整证书名，例如 `Developer ID Application: Example (TEAMID)` |
-| `NIMBUSSYNC_APP_PROFILE_BASE64` | `ai.tiylabs.nimbussync` 的 provisioning profile base64 |
-| `NIMBUSSYNC_FILE_PROVIDER_PROFILE_BASE64` | `ai.tiylabs.nimbussync.fileprovider` 的 provisioning profile base64 |
-| `NIMBUSSYNC_FILE_PROVIDER_UI_PROFILE_BASE64` | `ai.tiylabs.nimbussync.fileproviderui` 的 provisioning profile base64 |
+| `NIMBUSSYNC_APP_PROFILE_BASE64` | `ai.tiy.nimbussync` 的 provisioning profile base64 |
+| `NIMBUSSYNC_FILE_PROVIDER_PROFILE_BASE64` | `ai.tiy.nimbussync.fileprovider` 的 provisioning profile base64 |
+| `NIMBUSSYNC_FILE_PROVIDER_UI_PROFILE_BASE64` | `ai.tiy.nimbussync.fileproviderui` 的 provisioning profile base64 |
 
 三个 profile 必须与对应 Bundle ID、Team ID 和签名证书匹配，并且包含仓库 Release
 entitlements 中需要的 App Group 和 Keychain access group。App Group 默认是
-`group.ai.tiylabs.nimbussync`；如使用其他值，可配置 GitHub Repository Variable
+`group.ai.tiy.nimbussync`；如使用其他值，可配置 GitHub Repository Variable
 `NIMBUSSYNC_APP_GROUP_IDENTIFIER`。
 
 如果只是开发机验证，可使用 Apple Development 证书和开发 profile；如果要生成给

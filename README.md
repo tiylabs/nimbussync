@@ -258,7 +258,7 @@ BUILD_ROOT=/tmp/nimbussync-tests Scripts/ci/test.sh
 
 ```text
 .build/ci/derived/Build/Products/Debug/NimbusSync.app
-Dist/NimbusSync-0.1.0.app
+Dist/NimbusSync.app
 Dist/NimbusSync-0.1.0.zip
 Dist/NimbusSync-0.1.0.zip.sha256
 ```
@@ -290,7 +290,7 @@ profiles under `$HOME/Library/MobileDevice/Provisioning Profiles/`. Then provide
 | `NIMBUSSYNC_APP_PROFILE` | Yes | App profile UUID |
 | `NIMBUSSYNC_FILE_PROVIDER_PROFILE` | Yes | File Provider profile UUID |
 | `NIMBUSSYNC_FILE_PROVIDER_UI_PROFILE` | Yes | File Provider UI profile UUID |
-| `APP_GROUP_IDENTIFIER` | No | `group.ai.tiylabs.nimbussync` |
+| `APP_GROUP_IDENTIFIER` | No | `group.ai.tiy.nimbussync` |
 | `BUILD_ROOT`/`DIST_DIR`/`VERSION` | No | Build directory, output directory, and artifact version |
 
 This mode does not import certificates or profiles. The
@@ -337,7 +337,7 @@ NIMBUSSYNC_DEVELOPMENT_TEAM=<TEAM_ID> NIMBUSSYNC_OPEN_APP=1 \
 
 The script builds the `NimbusSync` scheme, permits Xcode provisioning updates,
 and verifies the app, both extensions, Team ID, the
-`group.ai.tiylabs.nimbussync` entitlement, and the File Provider document group.
+`group.ai.tiy.nimbussync` entitlement, and the File Provider document group.
 The Team ID is not stored in the repository.
 
 Development signing variables:
@@ -347,7 +347,7 @@ Development signing variables:
 | `NIMBUSSYNC_DEVELOPMENT_TEAM` | Yes | Apple Developer Team ID; alternatively pass it as the first argument |
 | `NIMBUSSYNC_SIGNED_BUILD_ROOT` | No | `$PWD/.build/xcode-signed` |
 | `NIMBUSSYNC_ARCH` | No | Current machine architecture; `arm64` or `x86_64` |
-| `NIMBUSSYNC_APP_GROUP_IDENTIFIER` | No | `group.ai.tiylabs.nimbussync` |
+| `NIMBUSSYNC_APP_GROUP_IDENTIFIER` | No | `group.ai.tiy.nimbussync` |
 | `NIMBUSSYNC_ALLOW_DEVICE_REGISTRATION` | No | Set to `1` to pass `-allowProvisioningDeviceRegistration` |
 | `NIMBUSSYNC_OPEN_APP` | No | Set to `1` to open the app after verification |
 
@@ -387,9 +387,9 @@ on the CI machine. Configure these GitHub Secrets:
 | `APPLE_CERTIFICATE_BASE64` | Base64 content of a `.p12` containing the private key |
 | `APPLE_CERTIFICATE_PASSWORD` | Password used to export the `.p12` |
 | `APPLE_SIGNING_IDENTITY` | Full certificate name, for example `Developer ID Application: Example (TEAMID)` |
-| `NIMBUSSYNC_APP_PROFILE_BASE64` | Provisioning profile for `ai.tiylabs.nimbussync` |
-| `NIMBUSSYNC_FILE_PROVIDER_PROFILE_BASE64` | Provisioning profile for `ai.tiylabs.nimbussync.fileprovider` |
-| `NIMBUSSYNC_FILE_PROVIDER_UI_PROFILE_BASE64` | Provisioning profile for `ai.tiylabs.nimbussync.fileproviderui` |
+| `NIMBUSSYNC_APP_PROFILE_BASE64` | Provisioning profile for `ai.tiy.nimbussync` |
+| `NIMBUSSYNC_FILE_PROVIDER_PROFILE_BASE64` | Provisioning profile for `ai.tiy.nimbussync.fileprovider` |
+| `NIMBUSSYNC_FILE_PROVIDER_UI_PROFILE_BASE64` | Provisioning profile for `ai.tiy.nimbussync.fileproviderui` |
 
 For development-machine validation, use an Apple Development certificate and
 development profiles. For a Release package intended for users, use a
@@ -398,7 +398,7 @@ as a separate step.
 
 The three profiles must match their Bundle IDs, Team ID, signing certificate, and
 the App Group and Keychain access group required by the Release entitlements. The
-default App Group is `group.ai.tiylabs.nimbussync`; set the repository variable
+default App Group is `group.ai.tiy.nimbussync`; set the repository variable
 `NIMBUSSYNC_APP_GROUP_IDENTIFIER` if it differs.
 
 Do not send certificates, private keys, profiles, or passwords in chat, and do not

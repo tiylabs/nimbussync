@@ -63,7 +63,7 @@ public final class NimbusSyncFileProviderItem: NSObject, NSFileProviderItem, NSF
         self.isMostRecentVersionDownloaded = isDownloaded
         self.isShared = false
         self.isSharedByCurrentUser = false
-        self.decorations = hasConflict ? [NSFileProviderItemDecorationIdentifier("ai.tiylabs.nimbussync.conflict")] : nil
+        self.decorations = hasConflict ? [NSFileProviderItemDecorationIdentifier("ai.tiy.nimbussync.conflict")] : nil
     }
 }
 
@@ -483,7 +483,7 @@ open class NimbusSyncFileProviderExtension: NSObject, NSFileProviderReplicatedEx
     public func performAction(identifier actionIdentifier: NSFileProviderExtensionActionIdentifier, onItemsWithIdentifiers itemIdentifiers: [NSFileProviderItemIdentifier], completionHandler: @escaping (Error?) -> Void) -> Progress {
         let progress = Progress(totalUnitCount: 1)
         let completion = ErrorCompletion(completionHandler)
-        guard actionIdentifier.rawValue == "ai.tiylabs.nimbussync.check-for-updates" else { completion.call(FileProviderErrorMapper.map(CoreFailure(code: .unsupportedMetadata, retryable: false))); return progress }
+        guard actionIdentifier.rawValue == "ai.tiy.nimbussync.check-for-updates" else { completion.call(FileProviderErrorMapper.map(CoreFailure(code: .unsupportedMetadata, retryable: false))); return progress }
         progress.cancellationHandler = { completion.call(FileProviderErrorMapper.map(CoreFailure(code: .cancelled, retryable: false))) }
         Task { [weak self] in
             guard let self, !progress.isCancelled else { completion.call(FileProviderErrorMapper.map(CoreFailure(code: .cancelled, retryable: false))); return }

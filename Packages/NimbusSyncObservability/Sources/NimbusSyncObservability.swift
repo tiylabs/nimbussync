@@ -63,7 +63,7 @@ public struct HealthCheck: Codable, Sendable {
 
 public final class NimbusSyncLogger: @unchecked Sendable {
     private let logger: Logger
-	public init(subsystem: String = "ai.tiylabs.nimbussync", category: String = "core") { logger = Logger(subsystem: subsystem, category: category) }
+	public init(subsystem: String = "ai.tiy.nimbussync", category: String = "core") { logger = Logger(subsystem: subsystem, category: category) }
     public func info(_ message: String, correlationID: CorrelationID = CorrelationID()) { logger.info("[\(correlationID.description, privacy: .public)] \(SecretRedactor.redact(message), privacy: .public)") }
     public func warning(_ message: String, correlationID: CorrelationID = CorrelationID()) { logger.warning("[\(correlationID.description, privacy: .public)] \(SecretRedactor.redact(message), privacy: .public)") }
     public func error(_ message: String, correlationID: CorrelationID = CorrelationID()) { logger.error("[\(correlationID.description, privacy: .public)] \(SecretRedactor.redact(message), privacy: .public)") }

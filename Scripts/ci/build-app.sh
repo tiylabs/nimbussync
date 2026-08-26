@@ -9,7 +9,7 @@ BUILD_ROOT=${BUILD_ROOT:-${NIMBUSSYNC_APP_BUILD_ROOT:-"$ROOT/.build/ci"}}
 DIST_DIR=${DIST_DIR:-${NIMBUSSYNC_DIST_DIR:-"$ROOT/Dist"}}
 VERSION=${VERSION:-${NIMBUSSYNC_VERSION:-0.1.0}}
 SIGNING_MODE=${SIGNING_MODE:-${NIMBUSSYNC_SIGNING_MODE:-unsigned}}
-APP_GROUP_IDENTIFIER=${APP_GROUP_IDENTIFIER:-${NIMBUSSYNC_APP_GROUP_IDENTIFIER:-group.ai.tiylabs.nimbussync}}
+APP_GROUP_IDENTIFIER=${APP_GROUP_IDENTIFIER:-${NIMBUSSYNC_APP_GROUP_IDENTIFIER:-group.ai.tiy.nimbussync}}
 CODE_SIGN_IDENTITY=${CODE_SIGN_IDENTITY:-${CI_SIGNING_IDENTITY:-${NIMBUSSYNC_CODE_SIGN_IDENTITY:-}}}
 
 mkdir -p "$BUILD_ROOT" "$DIST_DIR"
@@ -65,10 +65,15 @@ if [ "$SIGNING_MODE" = signed ]; then
     codesign --verify --deep --strict --verbose=2 "$app"
 fi
 
-artifact="$DIST_DIR/NimbusSync-$VERSION.app"
+# Keep the bundle name stable. Renaming a signed .app after codesign breaks the
+# bundle-level signature even when the Mach-O executable still carries a valid signature.
+artifact="$DIST_DIR/NimbusSync.app"
 archive="$DIST_DIR/NimbusSync-$VERSION.zip"
 rm -rf "$artifact" "$archive" "$archive.sha256"
 ditto "$app" "$artifact"
+if [ "$SIGNING_MODE" = signed ]; then
+    codesign --verify --deep --strict --verbose=2 "$artifact"
+fi
 ditto -c -k --sequesterRsrc --keepParent "$artifact" "$archive"
 shasum -a 256 "$archive" > "$archive.sha256"
 

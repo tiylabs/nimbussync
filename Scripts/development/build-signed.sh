@@ -7,7 +7,7 @@ CONFIG_FILE=${NIMBUSSYNC_CONFIG:-"$ROOT/.nimbussyncrc"}
 TEAM_ID=${NIMBUSSYNC_DEVELOPMENT_TEAM:-${1:-}}
 BUILD_ROOT=${NIMBUSSYNC_SIGNED_BUILD_ROOT:-"$ROOT/.build/xcode-signed"}
 ARCH=${NIMBUSSYNC_ARCH:-$(uname -m)}
-APP_GROUP=${NIMBUSSYNC_APP_GROUP_IDENTIFIER:-group.ai.tiylabs.nimbussync}
+APP_GROUP=${NIMBUSSYNC_APP_GROUP_IDENTIFIER:-group.ai.tiy.nimbussync}
 
 if [ -z "$TEAM_ID" ]; then
     printf '%s\n' "usage: NIMBUSSYNC_DEVELOPMENT_TEAM=<TEAM_ID> $0" >&2
@@ -85,5 +85,5 @@ printf '%s\n' "app group: $APP_GROUP"
 if [ "${NIMBUSSYNC_OPEN_APP:-0}" = 1 ]; then
     open "$APP"
     printf '%s\n' "NimbusSync launched; verify registration with:"
-    printf '%s\n' "pluginkit -m -i ai.tiylabs.nimbussync.fileprovider -A -D -v"
+    printf '%s\n' "pluginkit -m -i ai.tiy.nimbussync.fileprovider -A -D -v"
 fi

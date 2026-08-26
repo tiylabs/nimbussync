@@ -29,8 +29,12 @@ done
 
 app="$BUILD_ROOT/derived-arm64/Build/Products/Release/NimbusSync.app"
 if [ -d "$app" ]; then
-    ditto "$app" "$ROOT/Dist/NimbusSync-$VERSION.app"
-    ditto -c -k --sequesterRsrc --keepParent "$ROOT/Dist/NimbusSync-$VERSION.app" "$ROOT/Dist/NimbusSync-$VERSION.zip"
+    artifact="$ROOT/Dist/NimbusSync.app"
+    ditto "$app" "$artifact"
+    if [ "$signed" = true ]; then
+        codesign --verify --deep --strict --verbose=2 "$artifact"
+    fi
+    ditto -c -k --sequesterRsrc --keepParent "$artifact" "$ROOT/Dist/NimbusSync-$VERSION.zip"
     shasum -a 256 "$ROOT/Dist/NimbusSync-$VERSION.zip" > "$ROOT/Dist/NimbusSync-$VERSION.zip.sha256"
 fi
 

@@ -30,7 +30,7 @@
         <array>
             <dict>
                 <key>Identifier</key>
-                <string>ai.tiylabs.nimbussync.check-for-updates</string>
+                <string>ai.tiy.nimbussync.check-for-updates</string>
                 <key>Title</key>
                 <string>Check for Updates</string>
                 <key>Predicate</key>
@@ -41,7 +41,7 @@
         <array>
             <dict>
                 <key>Identifier</key>
-                <string>ai.tiylabs.nimbussync.conflict</string>
+                <string>ai.tiy.nimbussync.conflict</string>
                 <key>BadgeImageType</key>
                 <string>com.apple.icon-decoration.badge.exclamationmark</string>
                 <key>Label</key>
