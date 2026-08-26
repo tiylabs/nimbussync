@@ -510,6 +510,7 @@ private final class NimbusSyncAppState: ObservableObject {
     private let productStore: ProductStore
     private let oauth = OAuthAuthorizationSession()
     private let oauthLogger = Logger(subsystem: "ai.tiy.nimbussync", category: "oauth")
+    private let lifecycleLogger = Logger(subsystem: "ai.tiy.nimbussync", category: "lifecycle")
     private let heartbeat: HeartbeatCoordinator
     private let notifications: NotificationCoordinator
     private var started = false
@@ -816,10 +817,37 @@ private final class NimbusSyncAppState: ObservableObject {
     }
 
     func openFinder(domain: DomainDescriptor) {
-        let systemDomain = NSFileProviderDomain(identifier: NSFileProviderDomainIdentifier(domain.identifier), displayName: domain.displayName)
-        guard let manager = NSFileProviderManager(for: systemDomain) else { return }
-        manager.getUserVisibleURL(for: .rootContainer) { url, _ in
-            if let url { NSWorkspace.shared.open(url) }
+        let identifier = NSFileProviderDomainIdentifier(domain.identifier)
+        NSFileProviderManager.getDomainsWithCompletionHandler { [weak self] domains, error in
+            if let error {
+                self?.lifecycleLogger.error("finder.open_failed stage=list_domains error=\(error.localizedDescription, privacy: .public)")
+                return
+            }
+            guard let systemDomain = domains.first(where: { $0.identifier == identifier }),
+                  let manager = NSFileProviderManager(for: systemDomain) else {
+                self?.lifecycleLogger.error("finder.open_failed stage=resolve_domain")
+                return
+            }
+            manager.getUserVisibleURL(for: .rootContainer) { [weak self] url, error in
+                if let error {
+                    self?.lifecycleLogger.error("finder.open_failed stage=visible_url error=\(error.localizedDescription, privacy: .public)")
+                    return
+                }
+                guard let url else {
+                    self?.lifecycleLogger.error("finder.open_failed stage=visible_url_missing")
+                    return
+                }
+                DispatchQueue.main.async {
+                    let configuration = NSWorkspace.OpenConfiguration()
+                    configuration.activates = true
+                    NSWorkspace.shared.open(url, configuration: configuration) { _, error in
+                        if let error {
+                            Logger(subsystem: "ai.tiy.nimbussync", category: "lifecycle")
+                                .error("finder.open_failed stage=workspace_open error=\(error.localizedDescription, privacy: .public)")
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -881,9 +909,22 @@ private final class NimbusSyncAppState: ObservableObject {
 
     func setNotificationPreferences(_ preferences: NotificationPreferences) {
         Task {
-            try? await productStore.saveNotificationPreferences(preferences)
+            var next = preferences
+            if next.enabled {
+                next.enabled = (try? await notifications.requestAuthorizationIfNeeded()) ?? false
+                if !next.enabled {
+                    openNotificationSettings()
+                }
+            }
+            try? await productStore.saveNotificationPreferences(next)
             reload()
         }
+    }
+
+    private func openNotificationSettings() {
+        let bundleIdentifier = Bundle.main.bundleIdentifier ?? "ai.tiy.nimbussync"
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension?id=\(bundleIdentifier)") else { return }
+        NSWorkspace.shared.open(url)
     }
 
     func cancelTask(_ taskID: UUID) {
@@ -956,6 +997,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
 
 private struct SettingsView: View {
     let domains: [DomainDescriptor]
+    let persistedNotificationPreferences: NotificationPreferences
     let onOpenFinder: (DomainDescriptor) -> Void
     let onRemove: (DomainDescriptor) -> Void
     let onOpenWeb: (DomainDescriptor) -> Void
@@ -969,6 +1011,7 @@ private struct SettingsView: View {
 
     init(domains: [DomainDescriptor], notificationPreferences: NotificationPreferences, onOpenFinder: @escaping (DomainDescriptor) -> Void, onRemove: @escaping (DomainDescriptor) -> Void, onOpenWeb: @escaping (DomainDescriptor) -> Void, onReauthorize: @escaping (DomainDescriptor) -> Void, onNotificationsChanged: @escaping (NotificationPreferences) -> Void, onAddDomain: @escaping () -> Void) {
         self.domains = domains
+        persistedNotificationPreferences = notificationPreferences
         self.onOpenFinder = onOpenFinder
         self.onRemove = onRemove
         self.onOpenWeb = onOpenWeb
@@ -979,18 +1022,26 @@ private struct SettingsView: View {
     }
 
     var body: some View {
-        NavigationSplitView {
+        HStack(spacing: 0) {
             List(SettingsSection.allCases, selection: $selectedSection) { section in
                 Label(section.title, systemImage: section.symbol)
                     .tag(section)
             }
             .listStyle(.sidebar)
-            .navigationTitle("NimbusSync")
-            .navigationSplitViewColumnWidth(min: 180, ideal: 210, max: 240)
-        } detail: {
+            .safeAreaInset(edge: .top, spacing: 0) {
+                Color.clear.frame(height: 12)
+            }
+            .frame(minWidth: 200, idealWidth: 220, maxWidth: 240)
+
+            Divider()
+
             detailView
+                .id(selectedSection)
         }
         .frame(minWidth: 760, idealWidth: 860, minHeight: 520, idealHeight: 600)
+        .onChange(of: persistedNotificationPreferences) { value in
+            notificationPreferences = value
+        }
         .confirmationDialog("Remove \(pendingRemoval?.displayName ?? "domain")?", isPresented: Binding(get: { pendingRemoval != nil }, set: { if !$0 { pendingRemoval = nil } }), presenting: pendingRemoval) { domain in
             Button("Remove", role: .destructive) { onRemove(domain); pendingRemoval = nil }
             Button("Cancel", role: .cancel) { pendingRemoval = nil }
@@ -1044,6 +1095,11 @@ private struct SettingsView: View {
                     Toggle("Permanent failures", isOn: notificationBinding(\.permanentFailures))
                 }
                 .disabled(!notificationPreferences.enabled)
+            }
+            .onAppear {
+                if notificationPreferences.enabled {
+                    onNotificationsChanged(notificationPreferences)
+                }
             }
         case .diagnostics:
             SettingsPage(title: "Diagnostics", description: "Review the current local integration state.") {
@@ -1151,8 +1207,10 @@ private struct SettingsPage<Content: View>: View {
                 .scrollContentBackground(.hidden)
         }
         .padding(.horizontal, 28)
-        .padding(.vertical, 24)
+        .padding(.top, 28)
+        .padding(.bottom, 24)
         .frame(maxWidth: 780, alignment: .leading)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .clipped()
     }
 }

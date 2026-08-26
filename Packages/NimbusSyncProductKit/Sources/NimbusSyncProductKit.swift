@@ -198,7 +198,17 @@ public actor NotificationCoordinator {
     public init(center: UNUserNotificationCenter = .current(), userDefaults: UserDefaults = .standard, preferences: ProductStore) { self.center = center; self.userDefaults = userDefaults; self.preferences = preferences }
 
     public func requestAuthorizationIfNeeded() async throws -> Bool {
-        try await center.requestAuthorization(options: [.alert, .sound, .badge])
+        let settings = await center.notificationSettings()
+        switch settings.authorizationStatus {
+        case .notDetermined:
+            return try await center.requestAuthorization(options: [.alert, .sound, .badge])
+        case .authorized, .provisional, .ephemeral:
+            return true
+        case .denied:
+            return false
+        @unknown default:
+            return false
+        }
     }
 
     public func configureCategories() {
