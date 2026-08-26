@@ -181,8 +181,8 @@ File Provider。匹配的 SSE echo 只负责确认，不再次生成 provider-vi
   声明 Swift 6.0，但没有在仓库中锁定 Xcode 发行版。
 - Stable Rust/Cargo。Rust workspace 使用 edition 2021 和 Apache-2.0 package metadata；
   本 checkout 当前在 Rust 1.93.1 环境检查过。
-- 本地单元测试不需要真实 Cloudreve；contract probe 和任何真实服务端/Provider 支持结论
-  都需要受控 Cloudreve 实例。
+- 本地单元测试不需要真实 Cloudreve；任何真实服务端/Provider 支持结论都需要受控
+  Cloudreve 实例和单独的外部验证。
 - File Provider E2E 需要签名开发环境和真实 Finder 测试机；未签名构建只能证明编译路径。
 
 ### Clone
@@ -196,7 +196,77 @@ cd nimbussync
 
 ## 构建与测试
 
-先运行局部检查：
+所有本地脚本会自动读取仓库根目录的 [`.nimbussyncrc`](.nimbussyncrc)。文件中已填入
+有默认值的本地构建参数；Team ID、签名身份和 profile UUID 等无默认值参数只以
+注释形式列出。命令行显式设置的环境变量优先于配置文件；如需使用
+其他配置文件，可设置 `NIMBUSSYNC_CONFIG=/绝对路径/配置文件`。
+
+推荐的本地流程不需要配置任何自定义环境变量，按以下顺序执行：
+
+```sh
+cd /Users/jorbenzhu/Documents/Workplace/tiylabs/nimbussync
+
+# 1. Rust + Swift 测试；BUILD_ROOT 可选
+Scripts/ci/test.sh
+
+# 2. secret、Release entitlement、artifact 和空白检查
+Scripts/ci/verify.sh
+
+# 3. 未签名 Debug App、两个 File Provider 扩展和 zip
+Scripts/ci/build-app.sh
+```
+
+`Scripts/ci/test.sh` 默认使用 `.build/ci-tests` 保存隔离缓存；可用临时目录覆盖：
+
+```sh
+BUILD_ROOT=/tmp/nimbussync-tests Scripts/ci/test.sh
+```
+
+`Scripts/ci/build-app.sh` 默认使用 `Debug`、未签名模式、`.build/ci` 和 `Dist`，构建
+结果为：
+
+```text
+.build/ci/derived/Build/Products/Debug/NimbusSync.app
+Dist/NimbusSync-0.1.0.app
+Dist/NimbusSync-0.1.0.zip
+Dist/NimbusSync-0.1.0.zip.sha256
+```
+
+如需指定输出目录和版本：
+
+```sh
+CONFIGURATION=Debug \
+SIGNING_MODE=unsigned \
+BUILD_ROOT="$PWD/.build/debug" \
+DIST_DIR="$PWD/Dist/debug" \
+VERSION=dev \
+Scripts/ci/build-app.sh
+```
+
+以上普通测试和未签名构建不需要 `TEAM_ID`、证书、provisioning profile 或 Cloudreve
+凭据。
+
+如果使用 `Scripts/ci/build-app.sh` 的手动签名模式，则必须先把证书私钥导入当前
+用户的 keychain，并把三个 provisioning profile 安装到
+`$HOME/Library/MobileDevice/Provisioning Profiles/`，然后提供以下变量：
+
+| 变量 | 必需 | 说明 |
+| --- | --- | --- |
+| `SIGNING_MODE` | 是 | 设置为 `signed` |
+| `CONFIGURATION` | 否 | 通常使用 `Release`，默认 `Debug` |
+| `DEVELOPMENT_TEAM` | 是 | Apple Developer Team ID |
+| `CODE_SIGN_IDENTITY` | 是 | 当前 keychain 中的完整签名身份名称 |
+| `NIMBUSSYNC_APP_PROFILE` | 是 | App profile UUID |
+| `NIMBUSSYNC_FILE_PROVIDER_PROFILE` | 是 | File Provider profile UUID |
+| `NIMBUSSYNC_FILE_PROVIDER_UI_PROFILE` | 是 | File Provider UI profile UUID |
+| `APP_GROUP_IDENTIFIER` | 否 | 默认 `group.ai.tiylabs.nimbussync` |
+| `BUILD_ROOT`/`DIST_DIR`/`VERSION` | 否 | 构建目录、输出目录和 artifact 版本 |
+
+这个模式不会替你导入证书或 profile；GitHub Actions 使用的
+`Scripts/ci/setup-signing.sh` 是 CI 专用脚本，因为它通过 `GITHUB_ENV` 输出后续
+步骤变量。
+
+也可以分别运行底层局部检查：
 
 ```sh
 # Swift Package tests
@@ -238,17 +308,66 @@ NIMBUSSYNC_DEVELOPMENT_TEAM=<TEAM_ID> NIMBUSSYNC_OPEN_APP=1 \
 两个扩展、Team ID、`group.ai.tiylabs.nimbussync` entitlement 和 File Provider document group。
 Team ID 不写入仓库。
 
-需要可重复的阶段检查时，使用临时 build root。脚本还会执行 secret scan 和
-Release entitlement scan；Phase 0 还会构建默认 arm64 Rust XCFramework：
+开发签名脚本的环境变量：
+
+| 变量 | 必需 | 默认值/说明 |
+| --- | --- | --- |
+| `NIMBUSSYNC_DEVELOPMENT_TEAM` | 是 | Apple Developer Team ID；也可以作为第一个位置参数传入 |
+| `NIMBUSSYNC_SIGNED_BUILD_ROOT` | 否 | 默认 `$PWD/.build/xcode-signed` |
+| `NIMBUSSYNC_ARCH` | 否 | 默认当前机器架构，支持 `arm64` 或 `x86_64` |
+| `NIMBUSSYNC_APP_GROUP_IDENTIFIER` | 否 | 默认 `group.ai.tiylabs.nimbussync` |
+| `NIMBUSSYNC_ALLOW_DEVICE_REGISTRATION` | 否 | 设置为 `1` 才传递 `-allowProvisioningDeviceRegistration` |
+| `NIMBUSSYNC_OPEN_APP` | 否 | 设置为 `1`，签名校验后自动打开 App |
+
+需要可重复的测试和仓库检查时，使用 `Scripts/ci/` 下的统一入口。测试脚本使用临时
+build root，验证脚本执行 secret scan、Release entitlement scan、artifact scan 和
+空白检查：
 
 ```sh
-export CLOUDREVE_BUILD_ROOT=/tmp/nimbussync-phase-gate
-Scripts/phase-gates/phase-0.sh
+BUILD_ROOT=/tmp/nimbussync-tests Scripts/ci/test.sh
+Scripts/ci/verify.sh
 ```
 
-后续阶段使用 `phase-1.sh` 到 `phase-4.sh`。报告写入被 Git 忽略的
-`Artifacts/PhaseGates/`。这些 gate 有意把真实 Cloudreve、签名 Finder、公证和长稳
-证据与本地编译/单元测试分开。
+原有 Phase 0 至 Phase 4 的重复阶段门禁脚本已经退役。阶段设计文档和退出报告仍作为
+历史决策、能力边界和未验证项记录保留；真实 Cloudreve、签名 Finder、公证和长稳证据
+仍需要单独的环境验证，不能由本地测试替代。
+
+### GitHub Actions 自动构建
+
+仓库内置 [`build.yml`](.github/workflows/build.yml)，不需要打开 Xcode 图形界面：
+
+- push 和 Pull Request 自动运行 Rust/Swift 测试，并构建未签名 Debug App；
+- 在 GitHub Actions 的 `Run workflow` 中把 `signed` 设为 `true`，才会执行 Release
+  签名构建；
+- 签名 job 使用 GitHub Environment `signing`，可在仓库设置中增加审批人和只读分支限制；
+- 签名工作流只使用临时 keychain，完成后删除签名材料，并上传 App、zip 和 checksum。
+
+签名构建使用手动 profile 映射，不依赖 CI 机器上的 Xcode 登录状态。需要配置以下
+GitHub Secrets：
+
+| Secret | 内容 |
+| --- | --- |
+| `APPLE_TEAM_ID` | Apple Developer Team ID |
+| `APPLE_CERTIFICATE_BASE64` | `.p12` 证书的 base64 内容，包含私钥 |
+| `APPLE_CERTIFICATE_PASSWORD` | `.p12` 导出密码 |
+| `APPLE_SIGNING_IDENTITY` | 完整证书名，例如 `Developer ID Application: Example (TEAMID)` |
+| `NIMBUSSYNC_APP_PROFILE_BASE64` | `ai.tiylabs.nimbussync` 的 provisioning profile base64 |
+| `NIMBUSSYNC_FILE_PROVIDER_PROFILE_BASE64` | `ai.tiylabs.nimbussync.fileprovider` 的 provisioning profile base64 |
+| `NIMBUSSYNC_FILE_PROVIDER_UI_PROFILE_BASE64` | `ai.tiylabs.nimbussync.fileproviderui` 的 provisioning profile base64 |
+
+三个 profile 必须与对应 Bundle ID、Team ID 和签名证书匹配，并且包含仓库 Release
+entitlements 中需要的 App Group 和 Keychain access group。App Group 默认是
+`group.ai.tiylabs.nimbussync`；如使用其他值，可配置 GitHub Repository Variable
+`NIMBUSSYNC_APP_GROUP_IDENTIFIER`。
+
+如果只是开发机验证，可使用 Apple Development 证书和开发 profile；如果要生成给
+用户安装的 Release 包，应使用 `Developer ID Application` 证书及对应的 profile，
+并在后续单独执行公证流程。
+
+不要把证书、私钥、profile 或密码发送到聊天，也不要提交到仓库；只通过 GitHub
+Repository/Environment Secrets 配置。签名证书本身仍然需要从 Apple Developer
+后台准备，Actions 只负责导入和使用它们。签名构建不等于已公证；公证和 Gatekeeper
+验证仍是后续发布门禁。
 
 ### 构建 Rust artifact
 
@@ -257,16 +376,17 @@ RUST_TARGETS=aarch64-apple-darwin \
   Scripts/xtask/build-xcframework.sh
 ```
 
-脚本接受以空格分隔的 `RUST_TARGETS`，并将 framework 与 checksum 写入 `Artifacts/`。
+`RUST_TARGETS` 是以空格分隔的目标列表，默认是 `aarch64-apple-darwin`。构建
+Universal2 前先安装两个 Rust target：
+
+```sh
+rustup target add aarch64-apple-darwin x86_64-apple-darwin
+RUST_TARGETS="aarch64-apple-darwin x86_64-apple-darwin" \
+  Scripts/xtask/build-xcframework.sh
+```
+
+framework 与 checksum 写入 `Artifacts/`。
 不要提交生成物、凭据、响应 body 或包含 secret 的测试证据。
-
-### 可选的真实服务端 contract probe
-
-该 probe 默认不运行。目前它只验证 HTTPS 处理和 authenticated account identity；mutation、
-upload-provider、refresh-rotation 和签名 Finder 项目在环境准备好前保持 `unverified`。
-具体环境变量和命令见 [`Tests/ContractTests/README.md`](Tests/ContractTests/README.md)。
-不要提交凭据、响应 body 或生成报告；脚本只会在被忽略的 artifact 目录写入脱敏
-capability summary。
 
 ## Release 打包
 
@@ -279,6 +399,16 @@ VERSION=0.1.0 ARCHES=arm64 CODE_SIGNING_ALLOWED=NO \
 
 VERSION=0.1.0 Scripts/release/verify-release.sh
 ```
+
+Release 脚本支持以下变量：
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `VERSION` | `0.1.0` | artifact 版本号 |
+| `BUILD_ROOT` | `/tmp/nimbussync-release` | 测试、DerivedData 和日志目录 |
+| `ARCHES` | `arm64` | 以空格分隔的 `arm64`/`x86_64` 架构列表 |
+| `CODE_SIGNING_ALLOWED` | `NO` | `NO` 生成未签名工程包；签名 Release 需额外准备证书和 profiles |
+| `REQUIRE_SIGNED_RELEASE` | `0` | `verify-release.sh` 设为 `1` 时执行 `codesign` 和 `spctl` |
 
 Release 配置明确要求 Developer ID signing；Hardened Runtime、公证和 Gatekeeper 证据
 仍需要未来的 Release pipeline 补齐，仓库也不包含签名凭据。不要把本地组装的 archive
@@ -302,9 +432,8 @@ Packages/                           共享 Swift 模块
 Rust/crates/                        平台无关 protocol/core/store/FFI
 Rust/xtask/                         native artifact 命令包装器
 Config/                             Entitlement、Info.plist、Debug/Release 设置
-Scripts/                            Phase gate、contract probe、release、XCFramework
+Scripts/                            CI checks、release、XCFramework
 Tests/SwiftUnitTests/               Swift unit/invariant tests
-Tests/ContractTests/                可选真实 Cloudreve probe 文档
 docs/                               产品、架构、阶段计划、退出报告
 ```
 
@@ -326,7 +455,6 @@ docs/                               产品、架构、阶段计划、退出报�
 | Phase 3 SSE 与一致性 | [`docs/06-phase-3-events-consistency.md`](docs/06-phase-3-events-consistency.md) |
 | Phase 4 产品化与发布 | [`docs/07-phase-4-product-release.md`](docs/07-phase-4-product-release.md) |
 | 阶段退出证据 | [`docs/reports/`](docs/reports/) |
-| 真实 Cloudreve probe 边界 | [`Tests/ContractTests/README.md`](Tests/ContractTests/README.md) |
 | 仓库约定与安全规则 | [`AGENTS.md`](AGENTS.md) |
 
 阶段报告是“已经验证了什么”的事实来源。阶段计划描述目标范围和验收门槛，不能

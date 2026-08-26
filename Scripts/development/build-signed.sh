@@ -2,6 +2,8 @@
 set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+CONFIG_FILE=${NIMBUSSYNC_CONFIG:-"$ROOT/.nimbussyncrc"}
+[ -f "$CONFIG_FILE" ] && . "$CONFIG_FILE"
 TEAM_ID=${NIMBUSSYNC_DEVELOPMENT_TEAM:-${1:-}}
 BUILD_ROOT=${NIMBUSSYNC_SIGNED_BUILD_ROOT:-"$ROOT/.build/xcode-signed"}
 ARCH=${NIMBUSSYNC_ARCH:-$(uname -m)}

@@ -1,0 +1,150 @@
+name: NimbusSync Build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      signed:
+        description: Build and sign a Release app
+        required: true
+        default: false
+        type: boolean
+      version:
+        description: Artifact version
+        required: true
+        default: 0.1.0
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nimbussync-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify-and-build:
+    name: Test and unsigned build
+    runs-on: macos-15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: sudo xcode-select --switch /Applications/Xcode.app
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+
+      - name: Cache Rust dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            Rust/target
+          key: ${{ runner.os }}-rust-${{ hashFiles('Rust/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-rust-
+
+      - name: Check Rust formatting
+        working-directory: Rust
+        run: cargo fmt --all --check
+
+      - name: Run Rust and Swift tests
+        env:
+          BUILD_ROOT: ${{ runner.temp }}/nimbussync-tests
+        run: Scripts/ci/test.sh
+
+      - name: Run repository verification
+        run: Scripts/ci/verify.sh
+
+      - name: Build unsigned app and extensions
+        env:
+          CONFIGURATION: Debug
+          SIGNING_MODE: unsigned
+          BUILD_ROOT: ${{ runner.temp }}/nimbussync-debug
+          DIST_DIR: ${{ runner.temp }}/nimbussync-debug/Dist
+          VERSION: debug
+        run: Scripts/ci/build-app.sh
+
+      - name: Upload unsigned app
+        uses: actions/upload-artifact@v4
+        with:
+          name: NimbusSync-debug-${{ github.sha }}
+          path: ${{ runner.temp }}/nimbussync-debug/Dist/
+          if-no-files-found: error
+
+  signed-release:
+    name: Signed Release build
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.signed == true }}
+    needs: verify-and-build
+    runs-on: macos-15
+    environment: signing
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: sudo xcode-select --switch /Applications/Xcode.app
+
+      - name: Check signing secrets
+        env:
+          CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APP_PROFILE: ${{ secrets.NIMBUSSYNC_APP_PROFILE_BASE64 }}
+          FILE_PROVIDER_PROFILE: ${{ secrets.NIMBUSSYNC_FILE_PROVIDER_PROFILE_BASE64 }}
+          FILE_PROVIDER_UI_PROFILE: ${{ secrets.NIMBUSSYNC_FILE_PROVIDER_UI_PROFILE_BASE64 }}
+        run: |
+          test -n "$CERTIFICATE"
+          test -n "$CERTIFICATE_PASSWORD"
+          test -n "$SIGNING_IDENTITY"
+          test -n "$TEAM_ID"
+          test -n "$APP_PROFILE"
+          test -n "$FILE_PROVIDER_PROFILE"
+          test -n "$FILE_PROVIDER_UI_PROFILE"
+
+      - name: Install signing certificate and profiles
+        env:
+          APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          NIMBUSSYNC_APP_PROFILE_BASE64: ${{ secrets.NIMBUSSYNC_APP_PROFILE_BASE64 }}
+          NIMBUSSYNC_FILE_PROVIDER_PROFILE_BASE64: ${{ secrets.NIMBUSSYNC_FILE_PROVIDER_PROFILE_BASE64 }}
+          NIMBUSSYNC_FILE_PROVIDER_UI_PROFILE_BASE64: ${{ secrets.NIMBUSSYNC_FILE_PROVIDER_UI_PROFILE_BASE64 }}
+        run: Scripts/ci/setup-signing.sh
+
+      - name: Build signed Release app
+        env:
+          CONFIGURATION: Release
+          SIGNING_MODE: signed
+          BUILD_ROOT: ${{ runner.temp }}/nimbussync-release
+          DIST_DIR: ${{ runner.temp }}/nimbussync-release/Dist
+          VERSION: ${{ inputs.version }}
+          DEVELOPMENT_TEAM: ${{ secrets.APPLE_TEAM_ID }}
+          APP_GROUP_IDENTIFIER: ${{ vars.NIMBUSSYNC_APP_GROUP_IDENTIFIER || 'group.ai.tiylabs.nimbussync' }}
+        run: Scripts/ci/build-app.sh
+
+      - name: Run repository verification
+        run: Scripts/ci/verify.sh
+
+      - name: Upload signed Release app
+        uses: actions/upload-artifact@v4
+        with:
+          name: NimbusSync-${{ inputs.version }}-signed
+          path: ${{ runner.temp }}/nimbussync-release/Dist/
+          if-no-files-found: error
+
+      - name: Remove signing material
+        if: ${{ always() }}
+        run: Scripts/ci/cleanup-signing.sh

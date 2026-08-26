@@ -205,7 +205,6 @@ cloudreve-macos/
 ├── Tests/
 │   ├── SwiftUnitTests/
 │   ├── RustTests/
-│   ├── ContractTests/
 │   ├── FileProviderTests/
 │   └── EndToEndTests/
 └── docs/
@@ -1173,7 +1172,7 @@ NimbusSync.app
 
 ## 19. 协议兼容门禁
 
-以下事项必须由阶段 0 的真实 Cloudreve 环境验证，并固化为自动 contract test。它们是发布门禁，不是可在实现中猜测的细节。
+以下事项必须由受控的真实 Cloudreve/Finder 环境验证，并作为发布证据记录。它们是发布门禁，不是可在实现中猜测的细节。
 
 | 门禁 | 通过条件 | 不通过时的产品行为 |
 |---|---|---|
@@ -1235,7 +1234,7 @@ thumbnail
 | Phase 3 | [SSE、变更交付与最终一致性](./06-phase-3-events-consistency.md) | 事件缺失、进程终止和远端根变化后可自动收敛 |
 | Phase 4 | [1.0 产品化、质量与发布](./07-phase-4-product-release.md) | P0 + P1、AC-001 至 AC-014 和发布门禁全部通过 |
 
-每个阶段必须以对应计划中的自动化门禁、真实 Finder/Cloudreve 证据和 exit report 为完成依据。仅代码合并、静态检查通过或部分 happy path 成功，不构成阶段完成。
+每个阶段必须以对应计划中的自动化检查、真实 Finder/Cloudreve 证据和 exit report 为完成依据。仅代码合并、静态检查通过或部分 happy path 成功，不构成阶段完成。
 
 ### 阶段 0：协议与 File Provider Spike
 

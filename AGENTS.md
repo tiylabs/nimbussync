@@ -6,8 +6,8 @@
 - `Extensions/` contains the Replicated File Provider and File Provider UI extensions.
 - `Packages/` contains shared Swift modules for domain/auth, SQLite/App Group storage, events, File Provider adapters, product UI, diagnostics, and design tokens.
 - `Rust/crates/` contains protocol, store, core, transfer, reconciliation, and narrow FFI crates. `Rust/xtask` builds native artifacts.
-- `Tests/SwiftUnitTests/` and Rust crate `#[cfg(test)]` modules hold automated tests. `Tests/ContractTests/` documents opt-in real Cloudreve probes.
-- `Config/` holds entitlements, Info.plists, and build settings. Phase reports are in `docs/reports/`; gate scripts are under `Scripts/`.
+- `Tests/SwiftUnitTests/` and Rust crate `#[cfg(test)]` modules hold automated tests.
+- `Config/` holds entitlements, Info.plists, and build settings. Phase reports are in `docs/reports/`; CI and release scripts are under `Scripts/`.
 
 Keep remote identity, operation state, and secrets behind Store/Auth services. File Provider callbacks must not depend on the main app, old callback URLs, or detached in-memory work.
 
@@ -19,11 +19,12 @@ Run from the repository root unless noted:
 (cd Rust && cargo test --workspace)
 swift test --disable-sandbox
 xcodebuild -project NimbusSync.xcodeproj -scheme NimbusSync -configuration Debug CODE_SIGNING_ALLOWED=NO build
-Scripts/phase-gates/phase-0.sh   # use phase-1.sh through phase-4.sh for later gates
+Scripts/ci/test.sh
+Scripts/ci/verify.sh
 Scripts/xtask/build-xcframework.sh
 ```
 
-Use a temporary `CLOUDREVE_BUILD_ROOT` for repeatable gates. Real Cloudreve and Finder tests are opt-in; never commit credentials or response bodies.
+Use a temporary `BUILD_ROOT` for repeatable CI tests. Real Cloudreve and Finder validation is external to the local build; never commit credentials or response bodies.
 
 ## Coding Style & Naming
 

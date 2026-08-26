@@ -334,9 +334,9 @@ Healthy 必须同时满足有效 credential、root/scope、anchor、最近成功
 | App 退出后 Web 修改 | 明确 degraded；App 恢复后先校准再 healthy |
 | root 同路径替换 | 不接管新 ID |
 
-### 8.5 自动化门禁
+### 8.5 自动化检查
 
-`Scripts/phase-gates/phase-3.sh` 至少运行：
+当前统一检查入口 `Scripts/ci/test.sh` 和 `Scripts/ci/verify.sh` 至少运行：
 
 ```text
 SSE parser/property tests
@@ -358,7 +358,7 @@ AC-004/011/014 automated subset
 | Reconciliation v1 | scope/full scan、trash、tombstone、stable root |
 | State projection v1 | Domain reducer、pending/materialized/working set |
 | 长稳报告 | 72 小时、多 Domain、kill/network/server restart 数据 |
-| 自动化门禁 | `Scripts/phase-gates/phase-3.sh` |
+| 自动化检查 | `Scripts/ci/test.sh`、`Scripts/ci/verify.sh` |
 | 阶段报告 | `docs/reports/phase-3-exit.md` |
 
 ## 10. 阻断条件与完成定义

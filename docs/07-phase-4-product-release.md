@@ -348,9 +348,10 @@ Release pipeline：
 - 多 Domain 下用户 fetch/mutation 不被后台工作饿死；
 - 空闲无高频轮询，sleep 后无持续网络活动。
 
-### 8.6 自动化门禁
+### 8.6 自动化检查
 
-`Scripts/phase-gates/phase-4.sh` 聚合并固定版本：
+Release 流程使用 `Scripts/ci/test.sh` 和 `Scripts/ci/verify.sh`；真实平台和发布
+证据仍通过独立环境任务提供：
 
 ```text
 all Rust/Swift/store/contract/File Provider tests
@@ -390,13 +391,13 @@ fresh install + upgrade + prepare-uninstall tests
 | Release pipeline | universal2、sign、notarize、DMG、SBOM/checksum |
 | 测试证据 | AC-001 至 AC-014、性能、长稳、兼容和安全报告 |
 | 支持矩阵 | macOS、CPU、Cloudreve、Provider、能力和已知降级 |
-| 阶段报告 | `docs/reports/phase-4-release-readiness.md` |
+| 阶段报告 | `docs/reports/phase-4-release-readiness.md`，作为历史发布审计记录保留 |
 
 ## 11. 完成定义与发布决策
 
 ### 11.1 Release Candidate 条件
 
-1. Phase 0 至 Phase 4 gate 在候选 commit 全部通过；
+1. Phase 0 至 Phase 4 的历史验收条件在候选 commit 上全部有证据；
 2. AC-001 至 AC-014 全部有当前候选版本证据；
 3. 发布阻断项为零；
 4. 支持矩阵、隐私文案、许可证和品牌决策冻结；

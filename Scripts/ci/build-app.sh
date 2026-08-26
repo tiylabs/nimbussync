@@ -1,0 +1,76 @@
+#!/bin/sh
+set -eu
+
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+CONFIG_FILE=${NIMBUSSYNC_CONFIG:-"$ROOT/.nimbussyncrc"}
+[ -f "$CONFIG_FILE" ] && . "$CONFIG_FILE"
+CONFIGURATION=${CONFIGURATION:-${NIMBUSSYNC_CONFIGURATION:-Debug}}
+BUILD_ROOT=${BUILD_ROOT:-${NIMBUSSYNC_APP_BUILD_ROOT:-"$ROOT/.build/ci"}}
+DIST_DIR=${DIST_DIR:-${NIMBUSSYNC_DIST_DIR:-"$ROOT/Dist"}}
+VERSION=${VERSION:-${NIMBUSSYNC_VERSION:-0.1.0}}
+SIGNING_MODE=${SIGNING_MODE:-${NIMBUSSYNC_SIGNING_MODE:-unsigned}}
+APP_GROUP_IDENTIFIER=${APP_GROUP_IDENTIFIER:-${NIMBUSSYNC_APP_GROUP_IDENTIFIER:-group.ai.tiylabs.nimbussync}}
+CODE_SIGN_IDENTITY=${CODE_SIGN_IDENTITY:-${CI_SIGNING_IDENTITY:-${NIMBUSSYNC_CODE_SIGN_IDENTITY:-}}}
+
+mkdir -p "$BUILD_ROOT" "$DIST_DIR"
+
+set -- xcodebuild \
+    -project "$ROOT/NimbusSync.xcodeproj" \
+    -scheme NimbusSync \
+    -configuration "$CONFIGURATION" \
+    -destination platform=macOS \
+    -derivedDataPath "$BUILD_ROOT/derived" \
+    -clonedSourcePackagesDirPath "$BUILD_ROOT/source-packages" \
+    -packageCachePath "$BUILD_ROOT/package-cache" \
+    -skipPackageUpdates \
+    build
+
+case "$SIGNING_MODE" in
+    unsigned)
+        set -- "$@" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
+        ;;
+    signed)
+        DEVELOPMENT_TEAM=${DEVELOPMENT_TEAM:-${NIMBUSSYNC_DEVELOPMENT_TEAM:-}}
+        NIMBUSSYNC_APP_PROFILE=${NIMBUSSYNC_APP_PROFILE:-${NIMBUSSYNC_APP_PROFILE_UUID:-}}
+        NIMBUSSYNC_FILE_PROVIDER_PROFILE=${NIMBUSSYNC_FILE_PROVIDER_PROFILE:-${NIMBUSSYNC_FILE_PROVIDER_PROFILE_UUID:-}}
+        NIMBUSSYNC_FILE_PROVIDER_UI_PROFILE=${NIMBUSSYNC_FILE_PROVIDER_UI_PROFILE:-${NIMBUSSYNC_FILE_PROVIDER_UI_PROFILE_UUID:-}}
+        : "${DEVELOPMENT_TEAM:?DEVELOPMENT_TEAM or NIMBUSSYNC_DEVELOPMENT_TEAM is required for a signed build}"
+        : "${CODE_SIGN_IDENTITY:?CODE_SIGN_IDENTITY is required for a signed build}"
+        : "${NIMBUSSYNC_APP_PROFILE:?NIMBUSSYNC_APP_PROFILE is required for a signed build}"
+        : "${NIMBUSSYNC_FILE_PROVIDER_PROFILE:?NIMBUSSYNC_FILE_PROVIDER_PROFILE is required for a signed build}"
+        : "${NIMBUSSYNC_FILE_PROVIDER_UI_PROFILE:?NIMBUSSYNC_FILE_PROVIDER_UI_PROFILE is required for a signed build}"
+        set -- "$@" \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGNING_ALLOWED=YES \
+            CODE_SIGNING_REQUIRED=YES \
+            CODE_SIGN_IDENTITY="$CODE_SIGN_IDENTITY" \
+            DEVELOPMENT_TEAM="$DEVELOPMENT_TEAM" \
+            APP_GROUP_IDENTIFIER="$APP_GROUP_IDENTIFIER" \
+            NIMBUSSYNC_APP_PROFILE="$NIMBUSSYNC_APP_PROFILE" \
+            NIMBUSSYNC_FILE_PROVIDER_PROFILE="$NIMBUSSYNC_FILE_PROVIDER_PROFILE" \
+            NIMBUSSYNC_FILE_PROVIDER_UI_PROFILE="$NIMBUSSYNC_FILE_PROVIDER_UI_PROFILE"
+        ;;
+    *)
+        printf '%s\n' "unsupported SIGNING_MODE: $SIGNING_MODE" >&2
+        exit 2
+        ;;
+esac
+
+"$@"
+
+app="$BUILD_ROOT/derived/Build/Products/$CONFIGURATION/NimbusSync.app"
+[ -d "$app" ] || { printf '%s\n' "missing built app: $app" >&2; exit 1; }
+
+if [ "$SIGNING_MODE" = signed ]; then
+    codesign --verify --deep --strict --verbose=2 "$app"
+fi
+
+artifact="$DIST_DIR/NimbusSync-$VERSION.app"
+archive="$DIST_DIR/NimbusSync-$VERSION.zip"
+rm -rf "$artifact" "$archive" "$archive.sha256"
+ditto "$app" "$artifact"
+ditto -c -k --sequesterRsrc --keepParent "$artifact" "$archive"
+shasum -a 256 "$archive" > "$archive.sha256"
+
+printf '%s\n' "built: $artifact"
+printf '%s\n' "archive: $archive"

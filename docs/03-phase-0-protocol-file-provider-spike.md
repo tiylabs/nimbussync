@@ -1,7 +1,7 @@
 # 阶段 0 实施计划：协议门禁与 File Provider Spike
 
 > 阶段编号：Phase 0
-> 阶段状态：Conditional Go（本地工程/自动化门禁完成；真实 Cloudreve、签名 Finder 与 Provider 环境证据待补）
+> 阶段状态：Conditional Go（本地工程/自动化检查完成；真实 Cloudreve、签名 Finder 与 Provider 环境证据待补）
 > 目标版本：Technical Preview 前置门禁
 > 输入文档：[产品需求](./01-macos-product-requirements.md)、[技术架构](./02-macos-technical-architecture.md)
 > 后续阶段：[阶段 1：持久化与读路径](./04-phase-1-persistence-read-path.md)
@@ -13,7 +13,7 @@ Cloudreve Windows 客户端依赖 CFAPI、路径型 inventory 和普通文件系
 1. Cloudreve 是否提供足够稳定的实体身份、分页、条件写、创建幂等、删除和上传恢复语义；
 2. Replicated File Provider 在目标 macOS 版本上的 callback 重放、working set、trash、排除、Domain 移除和进程终止行为是否满足产品要求。
 
-本阶段以最小可运行 Spike 和自动 contract test 消除这些风险。Spike 只证明协议和系统行为，不承担生产级数据迁移、完整 UI、多 Domain 或全部 Provider 的最终实现。
+本阶段以最小可运行 Spike、本地自动化检查和外部环境验收暴露这些风险。Spike 只证明协议和系统行为，不承担生产级数据迁移、完整 UI、多 Domain 或全部 Provider 的最终实现。
 
 ## 2. 阶段目标
 
@@ -62,7 +62,7 @@ Cloudreve Windows 客户端依赖 CFAPI、路径型 inventory 和普通文件系
 - callback replay、`.workingSet`、`NSFileProviderDomainState`、materialized/pending set 行为；
 - trash、`excludedFromSync`、Domain removal、copy/move-out 和目录环行为实验；
 - upload session、分片重放、completion 查询和 refresh token 轮换探测；
-- 能力矩阵、风险台账、Spike 结论和阶段门禁脚本。
+- 能力矩阵、风险台账、Spike 结论和可复用自动化检查入口。
 
 ### 4.2 本阶段非范围
 
@@ -99,7 +99,7 @@ Cloudreve Windows 客户端依赖 CFAPI、路径型 inventory 和普通文件系
 | Entitlement | 配置 App Sandbox、outgoing network、App Group、Keychain Group、File Provider document group；Debug testing entitlement 与 Release 隔离 |
 | Domain | 使用 `crd-<uuid>`；显式设置 `supportsSyncingTrash = false`；不支持 external-volume/known-folder |
 | 最小 UI | App 只提供添加/移除测试 Domain、打开 Finder、展示最后错误，不做正式视觉设计 |
-| 自动化 | 增加 `Scripts/phase-gates/phase-0.sh`，串联 Rust、Swift、contract 和构建检查 |
+| 自动化 | 由 `Scripts/ci/test.sh` 和 `Scripts/ci/verify.sh` 负责测试与仓库检查；真实 Cloudreve/Finder 验收属于外部环境任务 |
 
 完成证据：三个产品 Target 可签名运行，Finder 可发现 Extension，Release 配置不含 testing entitlement。
 
@@ -114,9 +114,11 @@ Cloudreve Windows 客户端依赖 CFAPI、路径型 inventory 和普通文件系
 
 实现约束：Spike 可使用临时内存 repository，但所有 ID、version 和错误 DTO 必须按最终接口设计，避免阶段 1 再破坏 FFI。
 
-### 6.3 工作包 P0-W3：Cloudreve 协议探测器
+### 6.3 工作包 P0-W3：Cloudreve 外部契约验收
 
-在 `Tests/ContractTests/` 建立可参数化测试工具，测试输入来自环境变量或本机 Keychain，不提交凭据。
+本仓库不提供 Cloudreve 探测脚本。真实服务端身份、分页、mutation、上传和 refresh
+语义需要在受控环境中验证，并将脱敏结论作为外部发布证据保存；本地构建不读取
+Cloudreve 地址或 token。
 
 | 门禁 | 测试方法 | 通过判定 | 失败行为 |
 |---|---|---|---|
@@ -222,13 +224,13 @@ remote/SSE change
 
 ## 8. 验收标准
 
-### 8.1 自动化门禁
+### 8.1 自动化检查
 
 - `cargo test --workspace` 通过；
 - Swift unit tests 和最小 File Provider integration tests 通过；
 - `cargo xtask build-xcframework` 对目标架构成功且 binding diff 干净；
-- `Scripts/phase-gates/phase-0.sh` 一条命令生成门禁汇总；
-- capability report 不含 token、完整 signed URL、文件内容或真实敏感路径；
+- Rust/Swift 测试和仓库安全检查有独立可复用入口；真实 Cloudreve/Finder 验收由外部环境提供；
+- 外部能力证据不含 token、完整 signed URL、文件内容或真实敏感路径；
 - Release 配置扫描确认无 testing entitlement、HTTP 例外和关闭 TLS 验证选项。
 
 ### 8.2 真实 Finder 验收
@@ -256,11 +258,10 @@ remote/SSE change
 | 交付物 | 位置/形式 |
 |---|---|
 | 可运行 Spike | Xcode 三 Target + 最小 Rust XCFramework |
-| Contract tests | `Tests/ContractTests/` |
 | File Provider tests | `Tests/FileProviderTests/` |
-| 聚合门禁 | `Scripts/phase-gates/phase-0.sh` |
-| 能力矩阵 | `Artifacts/PhaseGates/phase-0/capability-report.{json,md}`，CI artifact |
-| 故障注入报告 | `Artifacts/PhaseGates/phase-0/fault-injection.md`，CI artifact |
+| 历史聚合门禁 | 已退役；当前使用 `Scripts/ci/test.sh`、`Scripts/ci/verify.sh` |
+| 能力矩阵 | 历史阶段 artifact；当前不由本地探测脚本生成 |
+| 故障注入报告 | 阶段历史记录；当前测试结果由 `Scripts/ci/test.sh` 产生 |
 | 阶段结论 | `docs/reports/phase-0-exit.md` |
 
 ## 10. 阻断条件与退出规则
@@ -287,6 +288,6 @@ remote/SSE change
 1. 真实 Finder Spike 达标；
 2. 协议能力矩阵冻结；
 3. 所有 unsupported 能力都有 fail-closed 产品行为；
-4. 阶段门禁脚本在干净环境可复现；
+4. 自动化检查在干净环境可复现；
 5. PRD/架构已按实测结果同步；
 6. 阶段退出报告由产品、Swift、Rust 和测试负责人共同确认。

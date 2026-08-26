@@ -298,9 +298,10 @@ UI 只读 projection，不直接写同步表；命令调用 Domain/Auth service�
 - secret scanner 对日志、SQLite 和 CI artifact 无命中；
 - Release 拒绝 HTTP、跨 origin Bearer 和无效证书。
 
-### 8.4 自动化门禁
+### 8.4 自动化检查
 
-新增 `Scripts/phase-gates/phase-1.sh`，至少运行：
+阶段实现曾使用阶段聚合门禁；当前统一使用 `Scripts/ci/test.sh` 和
+`Scripts/ci/verify.sh`，至少运行：
 
 ```text
 cargo test --workspace
@@ -321,7 +322,7 @@ Release entitlement/config scan
 | Auth v1 | OAuth、Keychain、refresh、重新授权 |
 | Read path v1 | 多 Domain、枚举、完整下载、eviction、离线 snapshot |
 | 基础 UI | onboarding、添加 Domain、菜单栏状态、Finder 入口 |
-| 自动化门禁 | `Scripts/phase-gates/phase-1.sh` |
+| 自动化检查 | `Scripts/ci/test.sh`、`Scripts/ci/verify.sh` |
 | 阶段报告 | `docs/reports/phase-1-exit.md` |
 
 ## 10. 阻断条件与完成定义

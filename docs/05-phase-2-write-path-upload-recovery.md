@@ -306,9 +306,9 @@ Domain 只有在完整 trash contract 通过时设置 `supportsSyncingTrash=true
 | exclusion intent 与用户 delete 竞争 | 只有精确 intent 走本地清理，无远端误删 |
 | Domain remove preflight 后新本地修改 | PreserveDirtyUserData 保留竞态产生的数据 |
 
-### 8.4 自动化门禁
+### 8.4 自动化检查
 
-`Scripts/phase-gates/phase-2.sh` 至少包含：
+当前统一检查入口 `Scripts/ci/test.sh` 和 `Scripts/ci/verify.sh` 至少包含：
 
 ```text
 Rust operation/uploader unit and integration tests
@@ -330,7 +330,7 @@ AC-003/005/006/008 automated subset
 | Conflict v1 | 持久 conflict 和三种解决 service |
 | Removal v1 | dirty data 安全移除和 preserved location |
 | Provider 报告 | 每个 Provider 的 write/resume/zero-byte/crypto 证据 |
-| 自动化门禁 | `Scripts/phase-gates/phase-2.sh` |
+| 自动化检查 | `Scripts/ci/test.sh`、`Scripts/ci/verify.sh` |
 | 阶段报告 | `docs/reports/phase-2-exit.md` |
 
 ## 10. 阻断条件与完成定义
