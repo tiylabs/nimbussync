@@ -18,7 +18,7 @@ Run from the repository root unless noted:
 ```sh
 (cd Rust && cargo test --workspace)
 swift test --disable-sandbox
-xcodebuild -project CloudreveMac.xcodeproj -scheme CloudreveMac -configuration Debug CODE_SIGNING_ALLOWED=NO build
+xcodebuild -project NimbusSync.xcodeproj -scheme NimbusSync -configuration Debug CODE_SIGNING_ALLOWED=NO build
 Scripts/phase-gates/phase-0.sh   # use phase-1.sh through phase-4.sh for later gates
 Scripts/xtask/build-xcframework.sh
 ```

@@ -35,7 +35,7 @@ NimbusSync 采用原生多进程架构，连接自托管 Cloudreve 服务端：
 | UI | SwiftUI，`NSStatusItem + NSPopover` 承载菜单栏界面 | AppKit 只用于 SwiftUI 尚不稳定或无法覆盖的系统行为 |
 | Finder 集成 | `NSFileProviderReplicatedExtension` | 不使用普通目录 watcher 模拟云文件 |
 | 后台运行 | 菜单栏主应用 + `SMAppService.mainApp` | 主应用可退出；Extension 仍必须完成系统请求，并将实时性标为降级 |
-| OAuth | `ASWebAuthenticationSession` + PKCE | Swift 校验 callback/state，Rust 完成协议交换 |
+| OAuth | 默认浏览器 + AppDelegate deep link + PKCE | Swift 校验 callback/state，并完成协议交换 |
 | FFI | UniFFI + 静态 XCFramework | 仅暴露稳定 DTO、异步命令、进度与结构化错误 |
 | 网络 | Rust `reqwest` + macOS native TLS | 禁止关闭 TLS 校验；显式适配系统代理 |
 | 并发 | Swift Concurrency + 受限 Tokio runtime | 不在 FFI 上传递 runtime 或裸线程句柄 |
@@ -161,9 +161,9 @@ flowchart TB
 
 ```text
 cloudreve-macos/
-├── CloudreveMac.xcodeproj
+├── NimbusSync.xcodeproj
 ├── Apps/
-│   └── CloudreveMac/
+│   └── NimbusSync/
 │       ├── AppLifecycle/
 │       ├── MenuBar/
 │       ├── Onboarding/
@@ -171,13 +171,13 @@ cloudreve-macos/
 │       ├── ConflictCenter/
 │       └── Diagnostics/
 ├── Extensions/
-│   ├── CloudreveFileProvider/
+│   ├── NimbusSyncFileProvider/
 │   │   ├── FileProviderExtension.swift
 │   │   ├── FileProviderItem.swift
 │   │   ├── Enumerator.swift
 │   │   ├── MutationCoordinator.swift
 │   │   └── ErrorMapping.swift
-│   └── CloudreveFileProviderUI/
+│   └── NimbusSyncFileProviderUI/
 │       ├── ActionViewController.swift
 │       └── ActionRouter.swift
 ├── Packages/
@@ -215,10 +215,10 @@ cloudreve-macos/
 
 | Target | 类型 | 依赖 |
 |---|---|---|
-| `CloudreveMac` | macOS App | Swift Packages、CloudreveCore |
-| `CloudreveFileProvider` | File Provider Extension | DomainKit、AuthKit、StoreBridge、CloudreveCore；Replicated File Provider 与非 UI actions |
-| `CloudreveFileProviderUI` | File Provider UI Extension | DomainKit、轻量 ActionRouter |
-| `CloudreveMacTests` | Unit Test Bundle | Swift 业务模块 |
+| `NimbusSync` | macOS App | Swift Packages、CloudreveCore |
+| `NimbusSyncFileProvider` | File Provider Extension | DomainKit、AuthKit、StoreBridge、CloudreveCore；Replicated File Provider 与非 UI actions |
+| `NimbusSyncFileProviderUI` | File Provider UI Extension | DomainKit、轻量 ActionRouter |
+| `NimbusSyncTests` | Unit Test Bundle | Swift 业务模块 |
 | `CloudreveFileProviderTests` | Unit/Integration Test Bundle | File Provider adapter 与测试服务器 |
 | `BuildCloudreveCore` | Aggregate/Script Target | Cargo `xtask build-xcframework` |
 
@@ -252,7 +252,7 @@ App 和 File Provider 使用相同 App Group 与最小 Keychain Access Group。F
 
 ### 5.2 `CloudreveAuthKit`
 
-- `OAuthCoordinator`：PKCE、state、`ASWebAuthenticationSession` 和 callback 校验；
+- `OAuthCoordinator`：PKCE、state、默认浏览器授权和 `cloudreve://mount` 校验，并兼容旧 `cloudreve://callback/desktop` 路由；
 - `CredentialVault`：Keychain 读写、删除和 access group 校验；
 - `TokenRefreshCoordinator`：跨进程刷新租约、过期偏移和失败恢复；
 - `SecretRedactor`：日志、诊断和错误对象的统一脱敏。
@@ -286,7 +286,7 @@ Keychain 使用 `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`。每个 Doma
 - 主应用设置 `LSUIElement`，默认不显示 Dock 图标；打开设置或冲突中心时激活并显示独立窗口；
 - 设置窗口使用 SwiftUI `Settings` 和 `NavigationSplitView`；
 - 添加网盘使用单独 `WindowGroup` 和显式状态机；
-- 冲突中心通过 `nimbussync-macos://conflict/<id>` deep link 定位；
+- 冲突中心通过 `nimbussync://conflict/<id>` deep link 定位；
 - 主应用内 `EventCoordinator` 管理 SSE、周期 reconciliation、`signalEnumerator` 与通知；退出应用后这些增强能力暂停；
 - 任务取消通过 SQLite `cancel_requested` + Darwin signal 跨进程传播；它只取消当前 attempt，不把仍由系统持有的 dirty change 标记为已放弃；
 - 登录启动使用 `SMAppService.mainApp`，开关读取系统真实注册状态；
@@ -866,7 +866,7 @@ reconciliation 使用可恢复的 generation scan：
 sequenceDiagram
     participant U as 用户
     participant A as 主应用
-    participant W as ASWebAuthenticationSession
+    participant W as 默认浏览器
     participant C as CloudreveCore
     participant K as Keychain
     participant D as Registry

@@ -83,7 +83,7 @@
 
 ### 6.1 工作包 P3-W1：EventCoordinator 与 SSE supervisor
 
-在 `Packages/CloudreveEventCoordinator/` 和 `Rust/crates/cloudreve-protocol/` 实现：
+在 `Packages/NimbusSyncEventCoordinator/` 和 `Rust/crates/cloudreve-protocol/` 实现：
 
 | 组件 | 职责 |
 |---|---|

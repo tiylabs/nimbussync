@@ -112,7 +112,7 @@ macOS 版本不应机械复制以下实现边界：
 | 主应用 UI | SwiftUI + 少量 AppKit | 网盘管理、设置、状态、菜单栏 |
 | Finder 云盘 | FileProvider | 系统级占位文件、下载、上传和变更枚举 |
 | Finder 交互 | FileProviderUI | 认证、错误处理和用户交互 |
-| 登录 | AuthenticationServices | 使用 `ASWebAuthenticationSession` |
+| 登录 | 默认浏览器 + `CFBundleURLTypes` | 使用 `NSWorkspace` 打开 OAuth，并由 AppDelegate 接收 `cloudreve://mount` |
 | 凭据 | Security / Keychain | App 与 Extension 通过 Keychain Access Group 共享 |
 | 通知 | UserNotifications | 替代 Windows Toast |
 | 自动启动 | ServiceManagement | 使用 `SMAppService` |

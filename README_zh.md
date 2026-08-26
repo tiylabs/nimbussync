@@ -38,7 +38,7 @@ Provider Domain，Finder 可以浏览远端 metadata、按需下载文件内容�
 | --- | --- | --- |
 | Rust protocol/core/store/FFI 基础 | 本地已验证 | Rust workspace 测试及阶段报告 |
 | Swift Store/Auth/File Provider/Event/Product 模块 | 本地已验证 | Swift Package 测试及 Xcode Debug 构建 |
-| 菜单栏 App 和扩展 Target 结构 | 本地已实现 | `CloudreveMac`、`CloudreveFileProvider`、`CloudreveFileProviderUI` |
+| 菜单栏 App 和扩展 Target 结构 | 本地已实现 | `NimbusSync`、`NimbusSyncFileProvider`、`NimbusSyncFileProviderUI` |
 | 真实 Cloudreve root/item identity 与条件写 | 未验证 | 需要受控的 Cloudreve contract 环境 |
 | Provider 上传完成与断点恢复矩阵 | 未验证 | 由 capability gate 控制，代码本身不能升级支持级别 |
 | 签名 Finder callback replay 与 File Provider E2E | 未验证 | 需要签名扩展和真实 Finder 证据 |
@@ -214,12 +214,29 @@ git diff --check
 
 ```sh
 xcodebuild \
-  -project CloudreveMac.xcodeproj \
-  -scheme CloudreveMac \
+  -project NimbusSync.xcodeproj \
+  -scheme NimbusSync \
   -configuration Debug \
   CODE_SIGNING_ALLOWED=NO \
   build
 ```
+
+需要实际注册 File Provider Domain 时必须使用 Apple Development 签名，未签名构建
+只能验证编译。先在 Xcode 登录开发者账号，并确保团队拥有 Bundle ID 和 App Group，
+再运行开发签名脚本：
+
+```sh
+NIMBUSSYNC_DEVELOPMENT_TEAM=<TEAM_ID> \
+  Scripts/development/build-signed.sh
+
+# 可选：签名验证通过后直接启动 App
+NIMBUSSYNC_DEVELOPMENT_TEAM=<TEAM_ID> NIMBUSSYNC_OPEN_APP=1 \
+  Scripts/development/build-signed.sh
+```
+
+脚本使用 `NimbusSync` Scheme，允许 Xcode 更新 provisioning profile，并校验主 App、
+两个扩展、Team ID、`group.ai.tiylabs.nimbussync` entitlement 和 File Provider document group。
+Team ID 不写入仓库。
 
 需要可重复的阶段检查时，使用临时 build root。脚本还会执行 secret scan 和
 Release entitlement scan；Phase 0 还会构建默认 arm64 Rust XCFramework：
@@ -270,18 +287,18 @@ Release 配置明确要求 Developer ID signing；Hardened Runtime、公证和 G
 ## 仓库结构
 
 ```text
-Apps/CloudreveMac/                 SwiftUI 菜单栏 App 和生命周期
-Extensions/CloudreveFileProvider/  Replicated File Provider 入口
-Extensions/CloudreveFileProviderUI/交互式 File Provider action
+Apps/NimbusSync/                   SwiftUI 菜单栏 App 和生命周期
+Extensions/NimbusSyncFileProvider/ Replicated File Provider 入口
+Extensions/NimbusSyncFileProviderUI/交互式 File Provider action
 Packages/                           共享 Swift 模块
-  CloudreveDomainKit/               Domain identity、lifecycle、health、scope
-  CloudreveAuthKit/                 OAuth、PKCE、Keychain、refresh 协调
-  CloudreveStoreBridge/             App Group SQLite 和持久状态
-  CloudreveEventCoordinator/        SSE、journal 交付、reconciliation 模型
-  CloudreveFileProviderKit/         Finder item、枚举、内容、mutation
-  CloudreveProductKit/              产品 projection、任务、冲突、UI state
-  CloudreveDesignSystem/            产品 design token
-  CloudreveObservability/           脱敏诊断和 metrics
+  NimbusSyncDomainKit/              Domain identity、lifecycle、health、scope
+  NimbusSyncAuthKit/                OAuth、PKCE、Keychain、refresh 协调
+  NimbusSyncStoreBridge/            App Group SQLite 和持久状态
+  NimbusSyncEventCoordinator/       SSE、journal 交付、reconciliation 模型
+  NimbusSyncFileProviderKit/        Finder item、枚举、内容、mutation
+  NimbusSyncProductKit/             产品 projection、任务、冲突、UI state
+  NimbusSyncDesignSystem/           产品 design token
+  NimbusSyncObservability/          脱敏诊断和 metrics
 Rust/crates/                        平台无关 protocol/core/store/FFI
 Rust/xtask/                         native artifact 命令包装器
 Config/                             Entitlement、Info.plist、Debug/Release 设置

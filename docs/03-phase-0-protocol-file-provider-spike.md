@@ -94,7 +94,7 @@ Cloudreve Windows 客户端依赖 CFAPI、路径型 inventory 和普通文件系
 
 | 项目 | 实施内容 |
 |---|---|
-| 目标路径 | `CloudreveMac.xcodeproj`、`Apps/CloudreveMac/`、`Extensions/CloudreveFileProvider/`、`Extensions/CloudreveFileProviderUI/`、`Config/` |
+| 目标路径 | `NimbusSync.xcodeproj`、`Apps/NimbusSync/`、`Extensions/NimbusSyncFileProvider/`、`Extensions/NimbusSyncFileProviderUI/`、`Config/` |
 | Xcode Target | 建立 App、Replicated File Provider、File Provider UI、Swift test 和 aggregate build target |
 | Entitlement | 配置 App Sandbox、outgoing network、App Group、Keychain Group、File Provider document group；Debug testing entitlement 与 Release 隔离 |
 | Domain | 使用 `crd-<uuid>`；显式设置 `supportsSyncingTrash = false`；不支持 external-volume/known-folder |

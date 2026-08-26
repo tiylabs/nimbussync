@@ -2,7 +2,7 @@
 import PackageDescription
 
 let package = Package(
-    name: "CloudreveMac",
+    name: "NimbusSyncPackages",
     defaultLocalization: "en",
     platforms: [.macOS(.v13)],
     products: [
@@ -19,7 +19,7 @@ let package = Package(
     targets: [
         .target(
             name: "CloudreveDomainKit",
-            path: "Packages/CloudreveDomainKit/Sources"
+            path: "Packages/NimbusSyncDomainKit/Sources"
         ),
         .systemLibrary(
             name: "CSQLite",
@@ -28,46 +28,46 @@ let package = Package(
         .target(
             name: "CloudreveStoreBridge",
             dependencies: ["CloudreveDomainKit", "CSQLite"],
-            path: "Packages/CloudreveStoreBridge/Sources"
+            path: "Packages/NimbusSyncStoreBridge/Sources"
         ),
         .target(
             name: "CloudreveAuthKit",
             dependencies: ["CloudreveDomainKit"],
-            path: "Packages/CloudreveAuthKit/Sources"
+            path: "Packages/NimbusSyncAuthKit/Sources"
         ),
         .target(
             name: "CloudreveEventCoordinator",
             dependencies: ["CloudreveDomainKit", "CloudreveStoreBridge", "CloudreveAuthKit"],
-            path: "Packages/CloudreveEventCoordinator/Sources"
+            path: "Packages/NimbusSyncEventCoordinator/Sources"
         ),
         .target(
             name: "CloudreveFileProviderKit",
             dependencies: ["CloudreveDomainKit", "CloudreveStoreBridge", "CloudreveAuthKit", "CloudreveEventCoordinator", "CloudreveObservability"],
-            path: "Packages/CloudreveFileProviderKit/Sources"
+            path: "Packages/NimbusSyncFileProviderKit/Sources"
         ),
         .target(
             name: "CloudreveDesignSystem",
             dependencies: ["CloudreveDomainKit"],
-            path: "Packages/CloudreveDesignSystem/Sources"
+            path: "Packages/NimbusSyncDesignSystem/Sources"
         ),
         .target(
             name: "CloudreveObservability",
             dependencies: ["CloudreveDomainKit"],
-            path: "Packages/CloudreveObservability/Sources"
+            path: "Packages/NimbusSyncObservability/Sources"
         ),
         .target(
             name: "CloudreveDomainService",
             dependencies: ["CloudreveDomainKit", "CloudreveStoreBridge", "CloudreveAuthKit"],
-            path: "Packages/CloudreveDomainService/Sources"
+            path: "Packages/NimbusSyncDomainService/Sources"
         ),
         .target(
             name: "CloudreveProductKit",
             dependencies: ["CloudreveDomainKit", "CloudreveStoreBridge", "CloudreveObservability", "CloudreveAuthKit", "CloudreveEventCoordinator"],
-            path: "Packages/CloudreveProductKit/Sources",
+            path: "Packages/NimbusSyncProductKit/Sources",
             resources: [.process("Resources")]
         ),
         .testTarget(
-            name: "CloudreveMacTests",
+            name: "NimbusSyncTests",
             dependencies: ["CloudreveDomainKit", "CloudreveStoreBridge", "CloudreveAuthKit", "CloudreveEventCoordinator", "CloudreveFileProviderKit", "CloudreveDomainService", "CloudreveProductKit"],
             path: "Tests/SwiftUnitTests"
         ),

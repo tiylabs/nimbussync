@@ -14,8 +14,8 @@ Phase 0 的本地实现、协议模型、故障注入单元测试、Swift Packag
 |---|---|---|
 | Rust protocol/core/store/transfer/FFI | 通过 | `HOME=/tmp/... CARGO_HOME=/tmp/... cargo test --workspace`，12 core + 10 protocol + 3 store tests 通过 |
 | Swift Domain/Auth/Store/Event/File Provider/Diagnostics | 通过 | 隔离 scratch/cache 执行 `swift test --disable-sandbox`，41 个测试通过 |
-| Xcode 工程 | 通过 | `xcodebuild -project CloudreveMac.xcodeproj -scheme CloudreveMac ... CODE_SIGNING_ALLOWED=NO build` |
-| 三个产品 Target | 可解析并构建 | `CloudreveMac`、`CloudreveFileProvider`、`CloudreveFileProviderUI` |
+| Xcode 工程 | 通过 | `xcodebuild -project NimbusSync.xcodeproj -scheme NimbusSync ... CODE_SIGNING_ALLOWED=NO build` |
+| 三个产品 Target | 可解析并构建 | `NimbusSync`、`NimbusSyncFileProvider`、`NimbusSyncFileProviderUI` |
 | Rust XCFramework | 通过 arm64 Debug/Release 构建 | `Scripts/xtask/build-xcframework.sh` |
 | Page/anchor 上限 | 通过 | Page token 和 sync anchor 单元测试；均限制在 500 bytes 内 |
 | SSE framing | 通过 | CRLF/LF、comment、多行 data、partial frame、CRLF 跨 chunk 测试 |
@@ -52,7 +52,7 @@ Phase 0 的本地实现、协议模型、故障注入单元测试、Swift Packag
 | signed Finder entitlement/callback replay | unverified | 只通过本地 adapter/unit tests，不能宣称真实 Finder 通过 |
 | trash/restore/excludedFromSync 实机握手 | unverified | `supportsSyncingTrash` 默认 false；排除 cleanup 需要精确 intent |
 
-另外，Rust protocol/core/store/FFI 与 XCFramework 构建证据已具备，但当前 App/Extension 的运行时调用路径仍由 Swift `CloudreveRemoteBackend`、`SQLiteStateStore` 和 Swift event pipeline 承担；Rust FFI 目前只暴露 ABI/identifier 验证，不能把 XCFramework 构建通过等同于 Rust Core 已接入产品运行时。
+另外，Rust protocol/core/store/FFI 与 XCFramework 构建证据已具备，但当前 App/Extension 的运行时调用路径仍由 Swift `NimbusSyncRemoteBackend`、`SQLiteStateStore` 和 Swift event pipeline 承担；Rust FFI 目前只暴露 ABI/identifier 验证，不能把 XCFramework 构建通过等同于 Rust Core 已接入产品运行时。
 
 ## 5. Phase 1 入口条件
 

@@ -16,7 +16,7 @@ for arch in $ARCHES; do
         x86_64) destination='platform=macOS,arch=x86_64' ;;
         *) echo "unsupported architecture: $arch" >&2; exit 2 ;;
     esac
-    HOME="$BUILD_ROOT/xcode-home" xcodebuild -project "$ROOT/CloudreveMac.xcodeproj" -scheme CloudreveMac -configuration Release -destination "$destination" -derivedDataPath "$BUILD_ROOT/derived-$arch" -clonedSourcePackagesDirPath "$BUILD_ROOT/packages-$arch" build CODE_SIGNING_ALLOWED=${CODE_SIGNING_ALLOWED:-NO}
+    HOME="$BUILD_ROOT/xcode-home" xcodebuild -project "$ROOT/NimbusSync.xcodeproj" -scheme NimbusSync -configuration Release -destination "$destination" -derivedDataPath "$BUILD_ROOT/derived-$arch" -clonedSourcePackagesDirPath "$BUILD_ROOT/packages-$arch" build CODE_SIGNING_ALLOWED=${CODE_SIGNING_ALLOWED:-NO}
 done
 
 app="$BUILD_ROOT/derived-arm64/Build/Products/Release/NimbusSync.app"

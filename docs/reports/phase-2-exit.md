@@ -42,7 +42,7 @@ Phase 2 的写路径基础已完成并通过本地 Rust/Swift/Xcode 门禁：持
 
 ## 4. 不允许带入下一阶段的假设
 
-- `CloudreveRemoteBackend` 在 capability snapshot 未证明 write/resumable/zero-byte 前不会开启写入。
+- `NimbusSyncRemoteBackend` 在 capability snapshot 未证明 write/resumable/zero-byte 前不会开启写入。
 - 旧 source URL、FD 和 signed URL 不会被 operation 持久化或跨 callback 使用。
 - 本地 mutation completion 不凭空写 provider-visible journal；远端额外变化由 Phase 3 enrichment/journal 消费。
 - Trash 同步默认关闭；只有真实 trash/restore/permanent-delete contract 通过才可以开启。

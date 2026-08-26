@@ -32,7 +32,7 @@ Phase 1 的本地 Store/Auth/Domain/read-path 工程基础已实现并通过本�
 |---|---|
 | Rust workspace tests | 通过，12 core + 10 protocol + 3 store tests |
 | Swift Package tests | 通过，41 tests；包含 10,000 item page benchmark |
-| Xcode Debug build | 通过，CloudreveMac、FileProvider、FileProviderUI 及 Swift packages |
+| Xcode Debug build | 通过，NimbusSync、NimbusSyncFileProvider、NimbusSyncFileProviderUI 及 Swift packages |
 | Secret/release static scan | 通过 |
 | App Group/Keychain real entitlement | 未验证，当前构建为 `CODE_SIGNING_ALLOWED=NO` |
 | Finder read path/eviction real E2E | 未验证 |

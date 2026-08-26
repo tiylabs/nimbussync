@@ -42,7 +42,7 @@ evidence:
 | --- | --- | --- |
 | Rust protocol/core/store/FFI primitives | Verified locally | Rust workspace tests and the phase reports |
 | Swift Store/Auth/File Provider/Event/Product modules | Verified locally | Swift package tests and Xcode Debug builds |
-| Menu-bar app and extension target structure | Implemented locally | `CloudreveMac`, `CloudreveFileProvider`, `CloudreveFileProviderUI` |
+| Menu-bar app and extension target structure | Implemented locally | `NimbusSync`, `NimbusSyncFileProvider`, `NimbusSyncFileProviderUI` |
 | Real Cloudreve root/item identity and conditional writes | Unverified | Requires a controlled Cloudreve contract environment |
 | Provider upload completion and resume matrix | Unverified | Capability-gated; no provider is promoted by code alone |
 | Signed Finder callback replay and File Provider E2E | Unverified | Requires signed extensions and real Finder evidence |
@@ -244,12 +244,30 @@ Build the unsigned Debug application and its extension targets:
 
 ```sh
 xcodebuild \
-  -project CloudreveMac.xcodeproj \
-  -scheme CloudreveMac \
+  -project NimbusSync.xcodeproj \
+  -scheme NimbusSync \
   -configuration Debug \
   CODE_SIGNING_ALLOWED=NO \
   build
 ```
+
+A real File Provider Domain requires an Apple Development-signed build; the
+unsigned build only verifies compilation. Sign in to the development team in
+Xcode, make sure it owns the Bundle IDs and App Group, and run:
+
+```sh
+NIMBUSSYNC_DEVELOPMENT_TEAM=<TEAM_ID> \
+  Scripts/development/build-signed.sh
+
+# Optional: launch the app after signature verification
+NIMBUSSYNC_DEVELOPMENT_TEAM=<TEAM_ID> NIMBUSSYNC_OPEN_APP=1 \
+  Scripts/development/build-signed.sh
+```
+
+The script builds the `NimbusSync` scheme, permits Xcode provisioning updates,
+and verifies the app, both extensions, Team ID, the
+`group.ai.tiylabs.nimbussync` entitlement, and the File Provider document group.
+The Team ID is not stored in the repository.
 
 For repeatable phase checks, use a temporary build root. The scripts also run
 secret and Release entitlement scans. Phase 0 additionally builds the default
@@ -308,18 +326,18 @@ describe a locally assembled archive as notarized or Gatekeeper-approved.
 ## Repository Map
 
 ```text
-Apps/CloudreveMac/                 SwiftUI menu-bar app and lifecycle
-Extensions/CloudreveFileProvider/  Replicated File Provider entry point
-Extensions/CloudreveFileProviderUI/Interactive File Provider actions
+Apps/NimbusSync/                   SwiftUI menu-bar app and lifecycle
+Extensions/NimbusSyncFileProvider/ Replicated File Provider entry point
+Extensions/NimbusSyncFileProviderUI/ Interactive File Provider actions
 Packages/                           Shared Swift modules
-  CloudreveDomainKit/               Domain identity, lifecycle, health, scope
-  CloudreveAuthKit/                 OAuth, PKCE, Keychain, refresh coordination
-  CloudreveStoreBridge/             App Group SQLite and durable state
-  CloudreveEventCoordinator/        SSE, journal delivery, reconciliation models
-  CloudreveFileProviderKit/         Finder item, enumeration, content, mutations
-  CloudreveProductKit/              Product projections, tasks, conflicts, UI state
-  CloudreveDesignSystem/            Product design tokens
-  CloudreveObservability/           Redacted diagnostics and metrics
+  NimbusSyncDomainKit/              Domain identity, lifecycle, health, scope
+  NimbusSyncAuthKit/                OAuth, PKCE, Keychain, refresh coordination
+  NimbusSyncStoreBridge/            App Group SQLite and durable state
+  NimbusSyncEventCoordinator/       SSE, journal delivery, reconciliation models
+  NimbusSyncFileProviderKit/        Finder item, enumeration, content, mutations
+  NimbusSyncProductKit/             Product projections, tasks, conflicts, UI state
+  NimbusSyncDesignSystem/           Product design tokens
+  NimbusSyncObservability/          Redacted diagnostics and metrics
 Rust/crates/                        Platform-neutral protocol/core/store/FFI
 Rust/xtask/                         Native artifact command wrapper
 Config/                             Entitlements, Info.plists, Debug/Release settings

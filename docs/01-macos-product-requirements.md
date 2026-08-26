@@ -135,7 +135,7 @@ url_input
 1. 输入 Cloudreve 站点 URL；
 2. 请求 `/api/v4/site/ping`，检查最低版本 `4.12.0`；
 3. 生成 PKCE，打开浏览器 OAuth；
-4. 通过 `nimbussync-macos://` deep link 接收 code/state/远端路径/用户 ID；
+4. 通过 Cloudreve 桌面授权约定的 `cloudreve://mount` deep link 接收 code/state/远端路径/用户 ID，并兼容旧 `cloudreve://callback/desktop` 路由；`nimbussync://` 仅用于客户端内部导航；
 5. 输入挂载名称并选择空的本地文件夹；
 6. 创建 Sync Root；
 7. 成功后打开本地云盘。
@@ -405,7 +405,7 @@ macOS 不展示“选择任意本地文件夹”。应明确告知用户：网�
 |---|---|---:|---|
 | FR-AUTH-001 | 接受合法 HTTPS Cloudreve URL | P0 | Release 拒绝明文 HTTP；仅 Debug/测试允许 loopback HTTP，解析或 scheme 不合规时就地提示 |
 | FR-AUTH-002 | 连接前请求 site ping | P0 | 区分 DNS、TLS、HTTP、API 和版本错误 |
-| FR-AUTH-003 | 支持 Cloudreve v4 OAuth + PKCE | P0 | 使用系统浏览器或 `ASWebAuthenticationSession` |
+| FR-AUTH-003 | 支持 Cloudreve v4 OAuth + PKCE | P0 | 使用系统默认浏览器，并通过 AppDelegate 接收严格校验的 callback |
 | FR-AUTH-004 | 校验 OAuth state | P0 | state 不匹配时拒绝 token exchange |
 | FR-AUTH-005 | token 仅保存到 Keychain | P0 | 配置、SQLite、日志均无明文 token |
 | FR-AUTH-006 | 自动刷新 access token | P0 | 多进程刷新不会造成 refresh token 竞争失效 |

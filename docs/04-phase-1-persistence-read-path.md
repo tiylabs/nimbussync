@@ -94,12 +94,12 @@
 
 | 路径 | 实施内容 |
 |---|---|
-| `CloudreveMac.xcodeproj` | 固化 App、File Provider、File Provider UI、test、aggregate targets 和 scheme |
+| `NimbusSync.xcodeproj` | 固化 App、File Provider、File Provider UI、test、aggregate targets 和 scheme |
 | `Config/*.xcconfig` | bundle ID、App Group、Keychain Group、deployment target、Debug/Release 能力 |
-| `Packages/CloudreveDomainKit` | Domain descriptor、lifecycle、identity、scope guard、state reducer |
-| `Packages/CloudreveAuthKit` | OAuth、Keychain、refresh lock、redactor |
-| `Packages/CloudreveStoreBridge` | App Group URL、schema bootstrap、UniFFI repository wrapper |
-| `Packages/CloudreveObservability` | OSLog、correlation ID、稳定错误码、脱敏 |
+| `Packages/NimbusSyncDomainKit` | Domain descriptor、lifecycle、identity、scope guard、state reducer |
+| `Packages/NimbusSyncAuthKit` | OAuth、Keychain、refresh lock、redactor |
+| `Packages/NimbusSyncStoreBridge` | App Group URL、schema bootstrap、UniFFI repository wrapper |
+| `Packages/NimbusSyncObservability` | OSLog、correlation ID、稳定错误码、脱敏 |
 | `Rust/crates/*` | 按架构拆分 protocol、store、core、ffi，移除 Spike 临时耦合 |
 
 工程规则：主应用和 Extension 各自加载静态 Core，不共享内存/runtime；UI 不拼 SQL；Rust 不持有 Apple Framework 对象；Release build phase 不访问网络。
@@ -129,7 +129,7 @@
 
 | 模块 | 实施内容 |
 |---|---|
-| `OAuthCoordinator` | `ASWebAuthenticationSession`、PKCE S256、一次性 state、严格 callback host/path |
+| `OAuthCoordinator` | 默认浏览器、AppDelegate deep link、PKCE S256、一次性 state、严格 callback host/path |
 | `CredentialVault` | 每 Domain 单一 Keychain item，保存 token、expiry、generation、token-family metadata |
 | `TokenRefreshCoordinator` | App Group advisory lock、有上限等待、Keychain generation 修复、unknown refresh outcome |
 | `SiteService` | HTTPS origin 规范化、site ping、版本/能力探测、manifest icon 基础 |

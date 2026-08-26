@@ -1,0 +1,150 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		A10000000000000000000001 /* NimbusSyncApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000001 /* NimbusSyncApp.swift */; };
+		A10000000000000000000002 /* FileProviderExtension.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000002 /* FileProviderExtension.swift */; };
+		A10000000000000000000003 /* ActionViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000003 /* ActionViewController.swift */; };
+		A10000000000000000000004 /* CloudreveDesignSystem in Frameworks */ = {isa = PBXBuildFile; productRef = A50000000000000000000001 /* CloudreveDesignSystem */; };
+		A10000000000000000000005 /* CloudreveDomainKit in Frameworks */ = {isa = PBXBuildFile; productRef = A50000000000000000000002 /* CloudreveDomainKit */; };
+		A10000000000000000000006 /* CloudreveFileProviderKit in Frameworks */ = {isa = PBXBuildFile; productRef = A50000000000000000000003 /* CloudreveFileProviderKit */; };
+		A10000000000000000000007 /* NimbusSyncTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000004 /* NimbusSyncTests.swift */; };
+		A10000000000000000000008 /* CloudreveProductKit in Frameworks */ = {isa = PBXBuildFile; productRef = A50000000000000000000004 /* CloudreveProductKit */; };
+		A1000000000000000000000B /* CloudreveDomainService in Frameworks */ = {isa = PBXBuildFile; productRef = A50000000000000000000005 /* CloudreveDomainService */; };
+		A10000000000000000000009 /* NimbusSyncFileProvider.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = A20000000000000000000006 /* NimbusSyncFileProvider.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		A1000000000000000000000A /* NimbusSyncFileProviderUI.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = A20000000000000000000007 /* NimbusSyncFileProviderUI.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		A20000000000000000000001 /* NimbusSyncApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NimbusSyncApp.swift; sourceTree = "<group>"; };
+		A20000000000000000000002 /* FileProviderExtension.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileProviderExtension.swift; sourceTree = "<group>"; };
+		A20000000000000000000003 /* ActionViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActionViewController.swift; sourceTree = "<group>"; };
+		A20000000000000000000004 /* NimbusSyncTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NimbusSyncTests.swift; sourceTree = "<group>"; };
+		A20000000000000000000005 /* NimbusSync.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = NimbusSync.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A20000000000000000000006 /* NimbusSyncFileProvider.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = NimbusSyncFileProvider.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		A20000000000000000000007 /* NimbusSyncFileProviderUI.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = NimbusSyncFileProviderUI.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		A20000000000000000000008 /* NimbusSyncTests.xctest */ = {isa = PBXFileReference; explicitFileType = "wrapper.cfbundle"; includeInIndex = 0; path = NimbusSyncTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		A20000000000000000000009 /* NimbusSync-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = NimbusSync-Info.plist; sourceTree = "<group>"; };
+		A2000000000000000000000A /* NimbusSyncFileProvider-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = NimbusSyncFileProvider-Info.plist; sourceTree = "<group>"; };
+		A2000000000000000000000B /* NimbusSyncFileProviderUI-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = NimbusSyncFileProviderUI-Info.plist; sourceTree = "<group>"; };
+		A2000000000000000000000C /* NimbusSync.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = NimbusSync.entitlements; sourceTree = "<group>"; };
+		A2000000000000000000000D /* NimbusSyncFileProvider.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = NimbusSyncFileProvider.entitlements; sourceTree = "<group>"; };
+		A20000000000000000000012 /* NimbusSyncRelease.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = NimbusSyncRelease.entitlements; sourceTree = "<group>"; };
+		A20000000000000000000013 /* NimbusSyncFileProviderRelease.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = NimbusSyncFileProviderRelease.entitlements; sourceTree = "<group>"; };
+		A2000000000000000000000E /* NimbusSyncFileProviderDebug.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = NimbusSyncFileProviderDebug.entitlements; sourceTree = "<group>"; };
+		A2000000000000000000000F /* NimbusSyncFileProviderUI.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = NimbusSyncFileProviderUI.entitlements; sourceTree = "<group>"; };
+		A20000000000000000000010 /* Debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Debug.xcconfig; sourceTree = "<group>"; };
+		A20000000000000000000011 /* Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Release.xcconfig; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		A30000000000000000000001 /* NimbusSync Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (A10000000000000000000004, A10000000000000000000005, A10000000000000000000006, A10000000000000000000008, A1000000000000000000000B, ); runOnlyForDeploymentPostprocessing = 0; };
+		A30000000000000000000002 /* NimbusSyncFileProvider Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (A10000000000000000000006, ); runOnlyForDeploymentPostprocessing = 0; };
+		A30000000000000000000003 /* NimbusSyncFileProviderUI Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		A30000000000000000000004 /* NimbusSyncTests Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (A10000000000000000000004, A10000000000000000000005, A10000000000000000000006, ); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		A40000000000000000000001 = {isa = PBXGroup; children = (A40000000000000000000002, A40000000000000000000003, A40000000000000000000004, A40000000000000000000005, A40000000000000000000006, A40000000000000000000007, ); sourceTree = "<group>"; };
+		A40000000000000000000002 /* Apps */ = {isa = PBXGroup; children = (A40000000000000000000008, ); path = Apps; sourceTree = "<group>"; };
+		A40000000000000000000003 /* Extensions */ = {isa = PBXGroup; children = (A40000000000000000000009, A4000000000000000000000A, ); path = Extensions; sourceTree = "<group>"; };
+		A40000000000000000000004 /* Config */ = {isa = PBXGroup; children = (A20000000000000000000009, A2000000000000000000000A, A2000000000000000000000B, A2000000000000000000000C, A2000000000000000000000D, A2000000000000000000000E, A2000000000000000000000F, A20000000000000000000010, A20000000000000000000011, A20000000000000000000012, A20000000000000000000013, ); path = Config; sourceTree = "<group>"; };
+		A40000000000000000000005 /* Tests */ = {isa = PBXGroup; children = (A4000000000000000000000B, ); path = Tests; sourceTree = "<group>"; };
+		A40000000000000000000006 /* Products */ = {isa = PBXGroup; children = (A20000000000000000000005, A20000000000000000000006, A20000000000000000000007, A20000000000000000000008, ); name = Products; sourceTree = "<group>"; };
+		A40000000000000000000008 /* NimbusSync */ = {isa = PBXGroup; children = (A20000000000000000000001, ); path = NimbusSync; sourceTree = "<group>"; };
+		A40000000000000000000009 /* NimbusSyncFileProvider */ = {isa = PBXGroup; children = (A20000000000000000000002, ); path = NimbusSyncFileProvider; sourceTree = "<group>"; };
+		A4000000000000000000000A /* NimbusSyncFileProviderUI */ = {isa = PBXGroup; children = (A20000000000000000000003, ); path = NimbusSyncFileProviderUI; sourceTree = "<group>"; };
+		A4000000000000000000000B /* SwiftUnitTests */ = {isa = PBXGroup; children = (A20000000000000000000004, ); path = SwiftUnitTests; sourceTree = "<group>"; };
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		A60000000000000000000001 /* NimbusSync */ = {isa = PBXNativeTarget; buildConfigurationList = A70000000000000000000001; buildPhases = (A3000000000000000000000D, A30000000000000000000001, A30000000000000000000006, A3000000000000000E, ); buildRules = (); dependencies = (A80000000000000000000001, A80000000000000000000002, ); name = NimbusSync; packageProductDependencies = (A50000000000000000000001, A50000000000000000000002, A50000000000000000000003, A50000000000000000000004, A50000000000000000000005, ); productName = NimbusSync; productReference = A20000000000000000000005; productType = "com.apple.product-type.application"; };
+		A60000000000000000000002 /* NimbusSyncFileProvider */ = {isa = PBXNativeTarget; buildConfigurationList = A70000000000000000000002; buildPhases = (A30000000000000000000007, A30000000000000000000002, A30000000000000000000008, ); buildRules = (); dependencies = (); name = NimbusSyncFileProvider; packageProductDependencies = (A50000000000000000000003, ); productName = NimbusSyncFileProvider; productReference = A20000000000000000000006; productType = "com.apple.product-type.app-extension"; };
+		A60000000000000000000003 /* NimbusSyncFileProviderUI */ = {isa = PBXNativeTarget; buildConfigurationList = A70000000000000000000003; buildPhases = (A30000000000000000000009, A30000000000000000000003, A3000000000000000000000A, ); buildRules = (); dependencies = (); name = NimbusSyncFileProviderUI; packageProductDependencies = (); productName = NimbusSyncFileProviderUI; productReference = A20000000000000000000007; productType = "com.apple.product-type.app-extension"; };
+		A60000000000000000000004 /* NimbusSyncTests */ = {isa = PBXNativeTarget; buildConfigurationList = A70000000000000000000004; buildPhases = (A3000000000000000000000B, A30000000000000000000004, A3000000000000000000000C, ); buildRules = (); dependencies = (A80000000000000000000003, ); name = NimbusSyncTests; packageProductDependencies = (A50000000000000000000001, A50000000000000000000002, A50000000000000000000003, A50000000000000000000004, ); productName = NimbusSyncTests; productReference = A20000000000000000000008; productType = "com.apple.product-type.bundle.unit-test"; };
+		A60000000000000000000005 /* CloudrevePhaseGates */ = {isa = PBXNativeTarget; buildConfigurationList = A70000000000000000000005; buildPhases = (); buildRules = (); dependencies = (); name = CloudrevePhaseGates; productName = CloudrevePhaseGates; productType = "com.apple.product-type.aggregate"; };
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		A90000000000000000000001 /* Project object */ = {isa = PBXProject; attributes = { LastUpgradeCheck = 2620; ORGANIZATIONNAME = TIYLabs; TargetAttributes = { A60000000000000000000001 = { CreatedOnToolsVersion = 26.2; }; A60000000000000000000002 = { CreatedOnToolsVersion = 26.2; }; A60000000000000000000003 = { CreatedOnToolsVersion = 26.2; }; A60000000000000000000004 = { CreatedOnToolsVersion = 26.2; TestTargetID = A60000000000000000000001; }; A60000000000000000000005 = { CreatedOnToolsVersion = 26.2; }; }; }; buildConfigurationList = A70000000000000000000006; compatibilityVersion = "Xcode 15.0"; developmentRegion = en; hasScannedForEncodings = 0; knownRegions = (en, zh-Hans, ); mainGroup = A40000000000000000000001; packageReferences = (AA00000000000000000000001, ); productRefGroup = A40000000000000000000006; projectDirPath = ""; projectRoot = ""; targets = (A60000000000000000000001, A60000000000000000000002, A60000000000000000000003, A60000000000000000000004, A60000000000000000000005, ); };
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		A30000000000000000000006 /* NimbusSync Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		A30000000000000000000008 /* NimbusSyncFileProvider Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		A3000000000000000000000A /* NimbusSyncFileProviderUI Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		A3000000000000000000000C /* NimbusSyncTests Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		A3000000000000000E /* Embed Foundation Extensions */ = {isa = PBXCopyFilesBuildPhase; buildActionMask = 2147483647; dstPath = ""; dstSubfolderSpec = 13; files = (A10000000000000000000009, A1000000000000000000000A, ); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		A30000000000000000000005 /* Build Rust Core */ = {isa = PBXShellScriptBuildPhase; buildActionMask = 2147483647; files = (); inputPaths = (); name = "Build Rust Core"; outputPaths = (); runOnlyForDeploymentPostprocessing = 0; shellPath = /bin/sh; shellScript = "if [ \"$CONFIGURATION\" = \"Release\" ]; then echo 'Rust XCFramework is built by the release gate'; fi"; };
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		A30000000000000000000007 /* NimbusSyncFileProvider Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A10000000000000000000002, ); runOnlyForDeploymentPostprocessing = 0; };
+		A30000000000000000000009 /* NimbusSyncFileProviderUI Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A10000000000000000000003, ); runOnlyForDeploymentPostprocessing = 0; };
+		A3000000000000000000000B /* NimbusSyncTests Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A10000000000000000000007, ); runOnlyForDeploymentPostprocessing = 0; };
+		A3000000000000000000000D /* NimbusSync Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A10000000000000000000001, ); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		A80000000000000000000001 = {isa = PBXTargetDependency; target = A60000000000000000000002; targetProxy = A80000000000000000000004; };
+		A80000000000000000000002 = {isa = PBXTargetDependency; target = A60000000000000000000003; targetProxy = A80000000000000000000005; };
+		A80000000000000000000003 = {isa = PBXTargetDependency; target = A60000000000000000000001; targetProxy = A80000000000000000000006; };
+/* End PBXTargetDependency section */
+
+/* Begin PBXContainerItemProxy section */
+		A80000000000000000000004 = {isa = PBXContainerItemProxy; containerPortal = A90000000000000000000001; proxyType = 1; remoteGlobalIDString = A60000000000000000000002; remoteInfo = NimbusSyncFileProvider; };
+		A80000000000000000000005 = {isa = PBXContainerItemProxy; containerPortal = A90000000000000000000001; proxyType = 1; remoteGlobalIDString = A60000000000000000000003; remoteInfo = NimbusSyncFileProviderUI; };
+		A80000000000000000000006 = {isa = PBXContainerItemProxy; containerPortal = A90000000000000000000001; proxyType = 1; remoteGlobalIDString = A60000000000000000000001; remoteInfo = NimbusSync; };
+/* End PBXContainerItemProxy section */
+
+/* Begin XCBuildConfiguration section */
+		A71000000000000000000001 = {isa = XCBuildConfiguration; baseConfigurationReference = A20000000000000000000010; buildSettings = { ALWAYS_SEARCH_USER_PATHS = NO; CLANG_ENABLE_MODULES = YES; CODE_SIGN_ENTITLEMENTS = Config/NimbusSync.entitlements; CURRENT_PROJECT_VERSION = 1; INFOPLIST_FILE = Config/NimbusSync-Info.plist; PRODUCT_BUNDLE_IDENTIFIER = ai.tiylabs.nimbussync; PRODUCT_NAME = NimbusSync; SWIFT_VERSION = 6.0; }; name = Debug; };
+		A71000000000000000000002 = {isa = XCBuildConfiguration; baseConfigurationReference = A20000000000000000000011; buildSettings = { CODE_SIGN_ENTITLEMENTS = Config/NimbusSyncRelease.entitlements; CURRENT_PROJECT_VERSION = 1; INFOPLIST_FILE = Config/NimbusSync-Info.plist; PRODUCT_BUNDLE_IDENTIFIER = ai.tiylabs.nimbussync; PRODUCT_NAME = NimbusSync; SWIFT_VERSION = 6.0; }; name = Release; };
+		A71000000000000000000003 = {isa = XCBuildConfiguration; baseConfigurationReference = A20000000000000000000010; buildSettings = { ALWAYS_SEARCH_USER_PATHS = NO; CODE_SIGN_ENTITLEMENTS = Config/NimbusSyncFileProviderDebug.entitlements; CURRENT_PROJECT_VERSION = 1; INFOPLIST_FILE = Config/NimbusSyncFileProvider-Info.plist; PRODUCT_BUNDLE_IDENTIFIER = ai.tiylabs.nimbussync.fileprovider; PRODUCT_NAME = NimbusSyncFileProvider; SWIFT_VERSION = 6.0; }; name = Debug; };
+		A71000000000000000000004 = {isa = XCBuildConfiguration; baseConfigurationReference = A20000000000000000000011; buildSettings = { CODE_SIGN_ENTITLEMENTS = Config/NimbusSyncFileProviderRelease.entitlements; CURRENT_PROJECT_VERSION = 1; INFOPLIST_FILE = Config/NimbusSyncFileProvider-Info.plist; PRODUCT_BUNDLE_IDENTIFIER = ai.tiylabs.nimbussync.fileprovider; PRODUCT_NAME = NimbusSyncFileProvider; SWIFT_VERSION = 6.0; }; name = Release; };
+		A71000000000000000000005 = {isa = XCBuildConfiguration; buildSettings = { CODE_SIGN_ENTITLEMENTS = Config/NimbusSyncFileProviderUI.entitlements; CURRENT_PROJECT_VERSION = 1; INFOPLIST_FILE = Config/NimbusSyncFileProviderUI-Info.plist; PRODUCT_BUNDLE_IDENTIFIER = ai.tiylabs.nimbussync.fileproviderui; PRODUCT_NAME = NimbusSyncFileProviderUI; SWIFT_VERSION = 6.0; }; name = Debug; };
+		A71000000000000000000006 = {isa = XCBuildConfiguration; buildSettings = { CODE_SIGN_ENTITLEMENTS = Config/NimbusSyncFileProviderUI.entitlements; CURRENT_PROJECT_VERSION = 1; INFOPLIST_FILE = Config/NimbusSyncFileProviderUI-Info.plist; PRODUCT_BUNDLE_IDENTIFIER = ai.tiylabs.nimbussync.fileproviderui; PRODUCT_NAME = NimbusSyncFileProviderUI; SWIFT_VERSION = 6.0; }; name = Release; };
+		A71000000000000000000007 = {isa = XCBuildConfiguration; baseConfigurationReference = A20000000000000000000010; buildSettings = { BUNDLE_LOADER = "$(TEST_HOST)"; CURRENT_PROJECT_VERSION = 1; GENERATE_INFOPLIST_FILE = YES; PRODUCT_BUNDLE_IDENTIFIER = ai.tiylabs.nimbussync.tests; PRODUCT_NAME = NimbusSyncTests; SWIFT_VERSION = 6.0; TEST_HOST = "$(BUILT_PRODUCTS_DIR)/NimbusSync.app/Contents/MacOS/NimbusSync"; }; name = Debug; };
+		A71000000000000000000008 = {isa = XCBuildConfiguration; baseConfigurationReference = A20000000000000000000011; buildSettings = { BUNDLE_LOADER = "$(TEST_HOST)"; CURRENT_PROJECT_VERSION = 1; GENERATE_INFOPLIST_FILE = YES; PRODUCT_BUNDLE_IDENTIFIER = ai.tiylabs.nimbussync.tests; PRODUCT_NAME = NimbusSyncTests; SWIFT_VERSION = 6.0; TEST_HOST = "$(BUILT_PRODUCTS_DIR)/NimbusSync.app/Contents/MacOS/NimbusSync"; }; name = Release; };
+		A71000000000000000000009 = {isa = XCBuildConfiguration; buildSettings = { PRODUCT_NAME = CloudrevePhaseGates; }; name = Debug; };
+		A7100000000000000000000A = {isa = XCBuildConfiguration; buildSettings = { PRODUCT_NAME = CloudrevePhaseGates; }; name = Release; };
+		A7100000000000000000000B = {isa = XCBuildConfiguration; buildSettings = { MACOSX_DEPLOYMENT_TARGET = 13.0; SWIFT_VERSION = 6.0; }; name = Debug; };
+		A7100000000000000000000C = {isa = XCBuildConfiguration; buildSettings = { MACOSX_DEPLOYMENT_TARGET = 13.0; SWIFT_VERSION = 6.0; }; name = Release; };
+		A7100000000000000000000D = {isa = XCBuildConfiguration; buildSettings = { MACOSX_DEPLOYMENT_TARGET = 13.0; SWIFT_VERSION = 6.0; }; name = Debug; };
+		A7100000000000000000000E = {isa = XCBuildConfiguration; buildSettings = { MACOSX_DEPLOYMENT_TARGET = 13.0; SWIFT_VERSION = 6.0; }; name = Release; };
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		A70000000000000000000001 = {isa = XCConfigurationList; buildConfigurations = (A71000000000000000000001, A71000000000000000000002, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		A70000000000000000000002 = {isa = XCConfigurationList; buildConfigurations = (A71000000000000000000003, A71000000000000000000004, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		A70000000000000000000003 = {isa = XCConfigurationList; buildConfigurations = (A71000000000000000000005, A71000000000000000000006, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		A70000000000000000000004 = {isa = XCConfigurationList; buildConfigurations = (A71000000000000000000007, A71000000000000000000008, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		A70000000000000000000005 = {isa = XCConfigurationList; buildConfigurations = (A71000000000000000000009, A7100000000000000000000A, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		A70000000000000000000006 = {isa = XCConfigurationList; buildConfigurations = (A7100000000000000000000B, A7100000000000000000000C, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		AA00000000000000000000001 = {isa = XCLocalSwiftPackageReference; relativePath = .; };
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		A50000000000000000000001 /* CloudreveDesignSystem */ = {isa = XCSwiftPackageProductDependency; package = AA00000000000000000000001; productName = CloudreveDesignSystem; };
+		A50000000000000000000002 /* CloudreveDomainKit */ = {isa = XCSwiftPackageProductDependency; package = AA00000000000000000000001; productName = CloudreveDomainKit; };
+		A50000000000000000000003 /* CloudreveFileProviderKit */ = {isa = XCSwiftPackageProductDependency; package = AA00000000000000000000001; productName = CloudreveFileProviderKit; };
+		A50000000000000000000004 /* CloudreveProductKit */ = {isa = XCSwiftPackageProductDependency; package = AA00000000000000000000001; productName = CloudreveProductKit; };
+		A50000000000000000000005 /* CloudreveDomainService */ = {isa = XCSwiftPackageProductDependency; package = AA00000000000000000000001; productName = CloudreveDomainService; };
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = A90000000000000000000001 /* Project object */;
+}

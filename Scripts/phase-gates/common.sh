@@ -17,7 +17,7 @@ run_swift() {
 
 run_xcode() {
     mkdir -p "$BUILD_ROOT/xcode-home/Library/Logs/CoreSimulator" "$BUILD_ROOT/source-packages" "$BUILD_ROOT/package-cache" "$BUILD_ROOT/derived-data"
-    HOME="$BUILD_ROOT/xcode-home" xcodebuild -project "$ROOT/CloudreveMac.xcodeproj" -scheme CloudreveMac -configuration Debug -derivedDataPath "$BUILD_ROOT/derived-data" -clonedSourcePackagesDirPath "$BUILD_ROOT/source-packages" -packageCachePath "$BUILD_ROOT/package-cache" -disablePackageRepositoryCache -skipPackageUpdates CODE_SIGNING_ALLOWED=NO build
+    HOME="$BUILD_ROOT/xcode-home" xcodebuild -project "$ROOT/NimbusSync.xcodeproj" -scheme NimbusSync -configuration Debug -derivedDataPath "$BUILD_ROOT/derived-data" -clonedSourcePackagesDirPath "$BUILD_ROOT/source-packages" -packageCachePath "$BUILD_ROOT/package-cache" -disablePackageRepositoryCache -skipPackageUpdates CODE_SIGNING_ALLOWED=NO build
 }
 
 secret_scan() {
@@ -28,7 +28,7 @@ secret_scan() {
 }
 
 release_scan() {
-    if rg -n 'com\.apple\.developer\.fileprovider\.testing-mode|NSAllowsArbitraryLoads|allowInsecure|http://localhost|http://127\.0\.0\.1' "$ROOT/Config/Release.xcconfig" "$ROOT/Config/CloudreveMacRelease.entitlements" "$ROOT/Config/CloudreveFileProviderRelease.entitlements" "$ROOT/Config/CloudreveFileProviderUI.entitlements" "$ROOT/CloudreveMac.xcodeproj"; then
+    if rg -n 'com\.apple\.developer\.fileprovider\.testing-mode|NSAllowsArbitraryLoads|allowInsecure|http://localhost|http://127\.0\.0\.1' "$ROOT/Config/Release.xcconfig" "$ROOT/Config/NimbusSyncRelease.entitlements" "$ROOT/Config/NimbusSyncFileProviderRelease.entitlements" "$ROOT/Config/NimbusSyncFileProviderUI.entitlements" "$ROOT/NimbusSync.xcodeproj"; then
         printf '%s\n' "release scan found a forbidden entitlement or transport exception" >&2
         return 1
     fi
