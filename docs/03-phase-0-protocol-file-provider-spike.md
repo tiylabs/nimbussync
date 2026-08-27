@@ -262,7 +262,7 @@ remote/SSE change
 | 历史聚合门禁 | 已退役；当前使用 `Scripts/build.sh` 做构建前仓库检查 |
 | 能力矩阵 | 历史阶段 artifact；当前不由本地探测脚本生成 |
 | 故障注入报告 | 阶段历史记录；当前测试按 Rust/Swift 开发命令直接执行 |
-| 阶段结论 | `docs/reports/phase-0-exit.md` |
+| 阶段结论 | `docs/archive/reports/phase-0-exit.md` |
 
 ## 10. 阻断条件与退出规则
 

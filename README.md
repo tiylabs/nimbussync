@@ -47,7 +47,7 @@ evidence:
 | Provider upload completion and resume matrix | Unverified | Capability-gated; no provider is promoted by code alone |
 | Signed Finder callback replay and File Provider E2E | Unverified | Requires signed extensions and real Finder evidence |
 | Developer ID, notarization, Gatekeeper, clean-machine upgrade | Unverified | Release credentials and test machines are still required |
-| 1.0 release candidate | No-Go | See [`phase-4-release-readiness.md`](docs/reports/phase-4-release-readiness.md) |
+| 1.0 release candidate | No-Go | See [`phase-4-release-readiness.md`](docs/archive/reports/phase-4-release-readiness.md) |
 
 The implementation uses a `verified` / `unsupported` / `unverified`
 capability model. Write access is not enabled merely because a code path exists:
@@ -331,7 +331,7 @@ Start with the document that matches your task:
 | Phase 2 write path and upload recovery | [`docs/05-phase-2-write-path-upload-recovery.md`](docs/05-phase-2-write-path-upload-recovery.md) |
 | Phase 3 SSE and consistency | [`docs/06-phase-3-events-consistency.md`](docs/06-phase-3-events-consistency.md) |
 | Phase 4 productization and release | [`docs/07-phase-4-product-release.md`](docs/07-phase-4-product-release.md) |
-| Phase exit evidence | [`docs/reports/`](docs/reports/) |
+| Phase exit evidence | [`docs/archive/reports/`](docs/archive/reports/) |
 | Repository conventions and security rules | [`AGENTS.md`](AGENTS.md) |
 
 The phase reports are the source of truth for what was locally verified. The

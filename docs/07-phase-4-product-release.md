@@ -391,7 +391,7 @@ fresh install + upgrade + prepare-uninstall tests
 | Release pipeline | universal2、sign、notarize、DMG、SBOM/checksum |
 | 测试证据 | AC-001 至 AC-014、性能、长稳、兼容和安全报告 |
 | 支持矩阵 | macOS、CPU、Cloudreve、Provider、能力和已知降级 |
-| 阶段报告 | `docs/reports/phase-4-release-readiness.md`，作为历史发布审计记录保留 |
+| 阶段报告 | `docs/archive/reports/phase-4-release-readiness.md`，作为历史发布审计记录保留 |
 
 ## 11. 完成定义与发布决策
 

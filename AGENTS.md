@@ -7,7 +7,7 @@
 - `Packages/` contains shared Swift modules for domain/auth, SQLite/App Group storage, events, File Provider adapters, product UI, diagnostics, and design tokens.
 - `Rust/crates/` contains protocol, store, core, transfer, reconciliation, and narrow FFI crates.
 - `Tests/SwiftUnitTests/` and Rust crate `#[cfg(test)]` modules hold automated tests.
-- `Config/` holds entitlements, Info.plists, and build settings. Phase reports are in `docs/reports/`; the unified build entry point is under `Scripts/`.
+- `Config/` holds entitlements, Info.plists, and build settings. Archived phase reports are in `docs/archive/reports/`; the unified build entry point is under `Scripts/`.
 
 Keep remote identity, operation state, and secrets behind Store/Auth services. File Provider callbacks must not depend on the main app, old callback URLs, or detached in-memory work.
 

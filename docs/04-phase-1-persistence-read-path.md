@@ -323,7 +323,7 @@ Release entitlement/config scan
 | Read path v1 | 多 Domain、枚举、完整下载、eviction、离线 snapshot |
 | 基础 UI | onboarding、添加 Domain、菜单栏状态、Finder 入口 |
 | 自动化检查 | `Scripts/build.sh` 及 Rust/Swift 专项测试命令 |
-| 阶段报告 | `docs/reports/phase-1-exit.md` |
+| 阶段报告 | `docs/archive/reports/phase-1-exit.md` |
 
 ## 10. 阻断条件与完成定义
 

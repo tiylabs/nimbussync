@@ -33,7 +33,6 @@
 		A2000000000000000000000A /* NimbusSyncFileProvider-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = NimbusSyncFileProvider-Info.plist; sourceTree = "<group>"; };
 		A2000000000000000000000B /* NimbusSyncFileProviderUI-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = NimbusSyncFileProviderUI-Info.plist; sourceTree = "<group>"; };
 		A2000000000000000000000C /* NimbusSync.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = NimbusSync.entitlements; sourceTree = "<group>"; };
-		A2000000000000000000000D /* NimbusSyncFileProvider.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = NimbusSyncFileProvider.entitlements; sourceTree = "<group>"; };
 		A20000000000000000000012 /* NimbusSyncRelease.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = NimbusSyncRelease.entitlements; sourceTree = "<group>"; };
 		A20000000000000000000013 /* NimbusSyncFileProviderRelease.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = NimbusSyncFileProviderRelease.entitlements; sourceTree = "<group>"; };
 		A2000000000000000000000E /* NimbusSyncFileProviderDebug.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = NimbusSyncFileProviderDebug.entitlements; sourceTree = "<group>"; };
@@ -53,7 +52,7 @@
 		A40000000000000000000001 = {isa = PBXGroup; children = (A40000000000000000000002, A40000000000000000000003, A40000000000000000000004, A40000000000000000000005, A40000000000000000000006, A40000000000000000000007, ); sourceTree = "<group>"; };
 		A40000000000000000000002 /* Apps */ = {isa = PBXGroup; children = (A40000000000000000000008, ); path = Apps; sourceTree = "<group>"; };
 		A40000000000000000000003 /* Extensions */ = {isa = PBXGroup; children = (A40000000000000000000009, A4000000000000000000000A, ); path = Extensions; sourceTree = "<group>"; };
-		A40000000000000000000004 /* Config */ = {isa = PBXGroup; children = (A20000000000000000000009, A2000000000000000000000A, A2000000000000000000000B, A2000000000000000000000C, A2000000000000000000000D, A2000000000000000000000E, A2000000000000000000000F, A20000000000000000000010, A20000000000000000000011, A20000000000000000000012, A20000000000000000000013, ); path = Config; sourceTree = "<group>"; };
+		A40000000000000000000004 /* Config */ = {isa = PBXGroup; children = (A20000000000000000000009, A2000000000000000000000A, A2000000000000000000000B, A2000000000000000000000C, A2000000000000000000000E, A2000000000000000000000F, A20000000000000000000010, A20000000000000000000011, A20000000000000000000012, A20000000000000000000013, ); path = Config; sourceTree = "<group>"; };
 		A40000000000000000000005 /* Tests */ = {isa = PBXGroup; children = (A4000000000000000000000B, ); path = Tests; sourceTree = "<group>"; };
 		A40000000000000000000006 /* Products */ = {isa = PBXGroup; children = (A20000000000000000000005, A20000000000000000000006, A20000000000000000000007, A20000000000000000000008, ); name = Products; sourceTree = "<group>"; };
 		A40000000000000000000008 /* NimbusSync */ = {isa = PBXGroup; children = (A20000000000000000000001, ); path = NimbusSync; sourceTree = "<group>"; };

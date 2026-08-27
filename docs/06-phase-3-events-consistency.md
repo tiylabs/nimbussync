@@ -359,7 +359,7 @@ AC-004/011/014 automated subset
 | State projection v1 | Domain reducer、pending/materialized/working set |
 | 长稳报告 | 72 小时、多 Domain、kill/network/server restart 数据 |
 | 自动化检查 | `Scripts/build.sh` 及事件专项测试命令 |
-| 阶段报告 | `docs/reports/phase-3-exit.md` |
+| 阶段报告 | `docs/archive/reports/phase-3-exit.md` |
 
 ## 10. 阻断条件与完成定义
 

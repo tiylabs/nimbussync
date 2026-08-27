@@ -43,7 +43,7 @@ Provider Domain，Finder 可以浏览远端 metadata、按需下载文件内容�
 | Provider 上传完成与断点恢复矩阵 | 未验证 | 由 capability gate 控制，代码本身不能升级支持级别 |
 | 签名 Finder callback replay 与 File Provider E2E | 未验证 | 需要签名扩展和真实 Finder 证据 |
 | Developer ID、公证、Gatekeeper、干净机器升级 | 未验证 | 需要发布凭据和测试机器 |
-| 1.0 Release Candidate | No-Go | 见 [`phase-4-release-readiness.md`](docs/reports/phase-4-release-readiness.md) |
+| 1.0 Release Candidate | No-Go | 见 [`phase-4-release-readiness.md`](docs/archive/reports/phase-4-release-readiness.md) |
 
 当前实现使用 `verified` / `unsupported` / `unverified` 三态 capability 模型。
 代码路径存在并不代表写能力已经开放：stable item identity、stable root identity、
@@ -296,7 +296,7 @@ docs/                               产品、架构、阶段计划、退出报�
 | Phase 2 写路径与上传恢复 | [`docs/05-phase-2-write-path-upload-recovery.md`](docs/05-phase-2-write-path-upload-recovery.md) |
 | Phase 3 SSE 与一致性 | [`docs/06-phase-3-events-consistency.md`](docs/06-phase-3-events-consistency.md) |
 | Phase 4 产品化与发布 | [`docs/07-phase-4-product-release.md`](docs/07-phase-4-product-release.md) |
-| 阶段退出证据 | [`docs/reports/`](docs/reports/) |
+| 阶段退出证据 | [`docs/archive/reports/`](docs/archive/reports/) |
 | 仓库约定与安全规则 | [`AGENTS.md`](AGENTS.md) |
 
 阶段报告是“已经验证了什么”的事实来源。阶段计划描述目标范围和验收门槛，不能

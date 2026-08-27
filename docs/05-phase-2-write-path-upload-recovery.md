@@ -331,7 +331,7 @@ AC-003/005/006/008 automated subset
 | Removal v1 | dirty data 安全移除和 preserved location |
 | Provider 报告 | 每个 Provider 的 write/resume/zero-byte/crypto 证据 |
 | 自动化检查 | `Scripts/build.sh` 及 Rust/Swift 专项测试命令 |
-| 阶段报告 | `docs/reports/phase-2-exit.md` |
+| 阶段报告 | `docs/archive/reports/phase-2-exit.md` |
 
 ## 10. 阻断条件与完成定义
 
