@@ -126,14 +126,10 @@ The Rust workspace is platform-neutral and currently contains:
 | `cloudreve-store` | SQLite schema, domains/items, journal, anchors, outbox, operation state, compaction, and backup helpers |
 | `cloudreve-core` | HTTP client, remote mutation primitives, health reduction, reconciliation, upload recovery, and AES-CTR-at-offset helpers |
 | `cloudreve-ffi` | Narrow C ABI for version and local identifier validation; static library output |
-| `xtask` | Native artifact command wrapper |
 
-`Scripts/xtask/build-xcframework.sh` packages the Rust static library as
-`Artifacts/CloudreveCore.xcframework`. The generated artifact is ignored by
-Git. The checked-in Xcode project currently links the Swift Package products
-directly; it does not automatically embed a generated XCFramework during an
-ordinary Debug build. Treat the Rust artifact pipeline and its Swift integration
-boundary as active engineering work, not as proof of a shipped binary SDK.
+The `cloudreve-ffi` crate remains in the Rust workspace, but native artifact
+packaging is deferred until product integration is complete. The current Xcode
+project links the Swift Package products directly.
 
 ## Architecture
 
@@ -147,7 +143,6 @@ flowchart LR
     Keychain[(Keychain<br/>credentials + upload secrets)]
     Cloudreve[Cloudreve HTTPS API / SSE]
     Rust[Rust workspace<br/>protocol / core / store / FFI]
-    Artifact[CloudreveCore.xcframework<br/>generated artifact]
 
     Finder <--> FP
     Finder <--> FPUI
@@ -158,7 +153,6 @@ flowchart LR
     FP <--> Keychain
     App <--> Cloudreve
     FP <--> Cloudreve
-    Rust --> Artifact
 ```
 
 The most important state path is:
@@ -224,40 +218,21 @@ cd nimbussync
 
 Use the repository's normal access method if the GitHub remote is private.
 
-## Build and Test
+## Build
 
-All local scripts automatically read [`.nimbussyncrc`](.nimbussyncrc) from the
-repository root. It contains defaults for local build settings; values without
-defaults such as Team ID, signing identity, and profile UUIDs are listed only as
-comments. Explicit command-line environment variables take
-precedence. Set `NIMBUSSYNC_CONFIG=/absolute/path/to/config` to use another file.
-
-The recommended local flow does not require custom environment variables:
+The single local build entry point is [`Scripts/build.sh`](Scripts/build.sh).
+It reads [`.nimbussyncrc`](.nimbussyncrc), runs the repository and Release
+configuration checks first, then builds the app and both extensions. It writes
+the app, zip archive, and checksum under `Dist/`.
 
 ```sh
-cd /Users/jorbenzhu/Documents/Workplace/tiylabs/nimbussync
-
-# 1. Rust + Swift tests; BUILD_ROOT is optional
-Scripts/ci/test.sh
-
-# 2. Secret, Release entitlement, artifact, and whitespace checks
-Scripts/ci/verify.sh
-
-# 3. Unsigned Debug App, both File Provider extensions, and a zip archive
-Scripts/ci/build-app.sh
+Scripts/build.sh
 ```
 
-`Scripts/ci/test.sh` uses `.build/ci-tests` for isolated caches by default:
-
-```sh
-BUILD_ROOT=/tmp/nimbussync-tests Scripts/ci/test.sh
-```
-
-`Scripts/ci/build-app.sh` defaults to `Debug`, unsigned mode, `.build/ci`, and
-`Dist`. It writes:
+The output is:
 
 ```text
-.build/ci/derived/Build/Products/Debug/NimbusSync.app
+.build/ci/derived/Build/Products/$CONFIGURATION/NimbusSync.app
 Dist/NimbusSync.app
 Dist/NimbusSync-0.1.0.zip
 Dist/NimbusSync-0.1.0.zip.sha256
@@ -271,15 +246,11 @@ SIGNING_MODE=unsigned \
 BUILD_ROOT="$PWD/.build/debug" \
 DIST_DIR="$PWD/Dist/debug" \
 VERSION=dev \
-Scripts/ci/build-app.sh
+Scripts/build.sh
 ```
 
-The normal tests and unsigned build do not require a Team ID, certificate,
-provisioning profile, or Cloudreve credentials.
-
-For manual signing through `Scripts/ci/build-app.sh`, first import the certificate
-and private key into the current user's keychain and install the three provisioning
-profiles under `$HOME/Library/MobileDevice/Provisioning Profiles/`. Then provide:
+For a signed build, import the certificate and private key into the current
+user's keychain, install the three provisioning profiles, and provide:
 
 | Variable | Required | Meaning |
 | --- | --- | --- |
@@ -293,11 +264,9 @@ profiles under `$HOME/Library/MobileDevice/Provisioning Profiles/`. Then provide
 | `APP_GROUP_IDENTIFIER` | No | `group.ai.tiy.nimbussync` |
 | `BUILD_ROOT`/`DIST_DIR`/`VERSION` | No | Build directory, output directory, and artifact version |
 
-This mode does not import certificates or profiles. The
-`Scripts/ci/setup-signing.sh` used by GitHub Actions is CI-only because it exports
-the profile values to later steps through `GITHUB_ENV`.
+The build entry point does not import certificates or profiles.
 
-The underlying checks can also be run separately:
+Tests and formatting can be run directly when needed:
 
 ```sh
 # Swift Package tests
@@ -306,155 +275,18 @@ swift test --disable-sandbox
 # Rust workspace tests
 (cd Rust && cargo test --workspace)
 
-# Formatting and whitespace checks
+# Formatting check
 (cd Rust && cargo fmt --all --check)
 git diff --check
 ```
 
-Build the unsigned Debug application and its extension targets:
+The build entry point also supports signed builds. A real File Provider Domain
+requires an Apple Development-signed build; an unsigned build only verifies
+compilation. Certificates and provisioning profiles must be installed separately.
 
-```sh
-xcodebuild \
-  -project NimbusSync.xcodeproj \
-  -scheme NimbusSync \
-  -configuration Debug \
-  CODE_SIGNING_ALLOWED=NO \
-  build
-```
-
-A real File Provider Domain requires an Apple Development-signed build; the
-unsigned build only verifies compilation. Sign in to the development team in
-Xcode, make sure it owns the Bundle IDs and App Group, and run:
-
-```sh
-NIMBUSSYNC_DEVELOPMENT_TEAM=<TEAM_ID> \
-  Scripts/development/build-signed.sh
-
-# Optional: launch the app after signature verification
-NIMBUSSYNC_DEVELOPMENT_TEAM=<TEAM_ID> NIMBUSSYNC_OPEN_APP=1 \
-  Scripts/development/build-signed.sh
-```
-
-The script builds the `NimbusSync` scheme, permits Xcode provisioning updates,
-and verifies the app, both extensions, Team ID, the
-`group.ai.tiy.nimbussync` entitlement, and the File Provider document group.
-The Team ID is not stored in the repository.
-
-Development signing variables:
-
-| Variable | Required | Default / meaning |
-| --- | --- | --- |
-| `NIMBUSSYNC_DEVELOPMENT_TEAM` | Yes | Apple Developer Team ID; alternatively pass it as the first argument |
-| `NIMBUSSYNC_SIGNED_BUILD_ROOT` | No | `$PWD/.build/xcode-signed` |
-| `NIMBUSSYNC_ARCH` | No | Current machine architecture; `arm64` or `x86_64` |
-| `NIMBUSSYNC_APP_GROUP_IDENTIFIER` | No | `group.ai.tiy.nimbussync` |
-| `NIMBUSSYNC_ALLOW_DEVICE_REGISTRATION` | No | Set to `1` to pass `-allowProvisioningDeviceRegistration` |
-| `NIMBUSSYNC_OPEN_APP` | No | Set to `1` to open the app after verification |
-
-For repeatable tests and repository checks, use the unified entry points under
-`Scripts/ci/`. The test script uses a temporary build root; the verification
-script runs secret, Release entitlement, artifact, and whitespace checks:
-
-```sh
-BUILD_ROOT=/tmp/nimbussync-tests Scripts/ci/test.sh
-Scripts/ci/verify.sh
-```
-
-The former Phase 0 through Phase 4 duplicate gate scripts are retired. Their
-design documents and exit reports remain as historical decision records,
-capability boundaries, and unresolved-evidence records. Real Cloudreve, signed
-Finder, notarization, and long-run evidence still require separate environment
-validation and cannot be replaced by local tests.
-
-### GitHub Actions builds
-
-The repository includes [`build.yml`](.github/workflows/build.yml), so the normal
-build does not require opening the Xcode GUI:
-
-- pushes and pull requests run Rust/Swift tests and build an unsigned Debug App;
-- the Release signing job runs only when `Run workflow` is started with `signed`
-  set to `true`;
-- the signing job uses the GitHub `signing` Environment, which can require approval
-  and restrict deployments to protected branches;
-- signing uses an ephemeral keychain and uploads the App, zip archive, and checksum.
-
-The signing job uses explicit profile mapping and does not depend on an Xcode login
-on the CI machine. Configure these GitHub Secrets:
-
-| Secret | Contents |
-| --- | --- |
-| `APPLE_TEAM_ID` | Apple Developer Team ID |
-| `APPLE_CERTIFICATE_BASE64` | Base64 content of a `.p12` containing the private key |
-| `APPLE_CERTIFICATE_PASSWORD` | Password used to export the `.p12` |
-| `APPLE_SIGNING_IDENTITY` | Full certificate name, for example `Developer ID Application: Example (TEAMID)` |
-| `NIMBUSSYNC_APP_PROFILE_BASE64` | Provisioning profile for `ai.tiy.nimbussync` |
-| `NIMBUSSYNC_FILE_PROVIDER_PROFILE_BASE64` | Provisioning profile for `ai.tiy.nimbussync.fileprovider` |
-| `NIMBUSSYNC_FILE_PROVIDER_UI_PROFILE_BASE64` | Provisioning profile for `ai.tiy.nimbussync.fileproviderui` |
-
-For development-machine validation, use an Apple Development certificate and
-development profiles. For a Release package intended for users, use a
-`Developer ID Application` certificate and matching profiles, then run notarization
-as a separate step.
-
-The three profiles must match their Bundle IDs, Team ID, signing certificate, and
-the App Group and Keychain access group required by the Release entitlements. The
-default App Group is `group.ai.tiy.nimbussync`; set the repository variable
-`NIMBUSSYNC_APP_GROUP_IDENTIFIER` if it differs.
-
-Do not send certificates, private keys, profiles, or passwords in chat, and do not
-commit them. Store them only as GitHub Repository or Environment Secrets. The
-certificate still has to be created in Apple Developer; Actions only imports and
-uses it. A signed build is not notarized; notarization and Gatekeeper validation
-remain separate release gates.
-
-### Build the Rust artifact
-
-```sh
-RUST_TARGETS=aarch64-apple-darwin \
-  Scripts/xtask/build-xcframework.sh
-```
-
-`RUST_TARGETS` is a space-separated target list and defaults to
-`aarch64-apple-darwin`. For a Universal2 build, install both targets first:
-
-```sh
-rustup target add aarch64-apple-darwin x86_64-apple-darwin
-RUST_TARGETS="aarch64-apple-darwin x86_64-apple-darwin" \
-  Scripts/xtask/build-xcframework.sh
-```
-
-The generated framework and checksum are written under `Artifacts/`. Do not
-commit generated artifacts, credentials, response bodies, or test evidence
-containing secrets.
-
-## Release Packaging
-
-Release packaging is an engineering exercise, not a public download path yet.
-The scripts can assemble an app archive and checksum, but the current manifest
-explicitly records `notarized: false` unless a future release pipeline supplies
-the missing evidence.
-
-```sh
-VERSION=0.1.0 ARCHES=arm64 CODE_SIGNING_ALLOWED=NO \
-  Scripts/release/build-release.sh
-
-VERSION=0.1.0 Scripts/release/verify-release.sh
-```
-
-Release variables:
-
-| Variable | Default | Meaning |
-| --- | --- | --- |
-| `VERSION` | `0.1.0` | Artifact version |
-| `BUILD_ROOT` | `/tmp/nimbussync-release` | Test, DerivedData, and log directory |
-| `ARCHES` | `arm64` | Space-separated `arm64`/`x86_64` list |
-| `CODE_SIGNING_ALLOWED` | `NO` | `NO` creates an unsigned engineering archive; signed Release needs certificates and profiles |
-| `REQUIRE_SIGNED_RELEASE` | `0` | Set to `1` for `codesign` and `spctl` checks in `verify-release.sh` |
-
-The Release configuration requests Developer ID signing. Hardened Runtime,
-notarization, and Gatekeeper evidence still require a future release pipeline,
-while the checked-in repository does not contain signing credentials. Do not
-describe a locally assembled archive as notarized or Gatekeeper-approved.
+The former Phase 0 through Phase 4 duplicate gate scripts, GitHub Actions
+workflow, and standalone Release scripts are intentionally deferred. They can
+be reintroduced after the product workflow and release evidence are complete.
 
 ## Repository Map
 
@@ -472,9 +304,8 @@ Packages/                           Shared Swift modules
   NimbusSyncDesignSystem/           Product design tokens
   NimbusSyncObservability/          Redacted diagnostics and metrics
 Rust/crates/                        Platform-neutral protocol/core/store/FFI
-Rust/xtask/                         Native artifact command wrapper
 Config/                             Entitlements, Info.plists, Debug/Release settings
-Scripts/                            CI checks, release, XCFramework
+Scripts/build.sh                    Pre-build checks, app build, and packaging
 Tests/SwiftUnitTests/               Swift unit and invariant tests
 docs/                               Product, architecture, phase plans, exit reports
 ```

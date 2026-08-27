@@ -29,7 +29,7 @@ NIMBUSSYNC_CODE_SIGNING_ALLOWED="${NIMBUSSYNC_CODE_SIGNING_ALLOWED:-NO}"
 NIMBUSSYNC_REQUIRE_SIGNED_RELEASE="${NIMBUSSYNC_REQUIRE_SIGNED_RELEASE:-0}"
 
 # Required only for local manual signing. Uncomment and fill with non-secret
-# identifiers/profile UUIDs when using Scripts/ci/build-app.sh signed mode.
+# identifiers/profile UUIDs when using Scripts/build.sh signed mode.
 NIMBUSSYNC_DEVELOPMENT_TEAM=3Y76W6673W
 NIMBUSSYNC_CODE_SIGN_IDENTITY='Developer ID Application: BINBIN ZHU (3Y76W6673W)'
 NIMBUSSYNC_APP_PROFILE=a4898c78-49dd-4848-86ca-025b19a9cb65

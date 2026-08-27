@@ -308,7 +308,7 @@ Domain 只有在完整 trash contract 通过时设置 `supportsSyncingTrash=true
 
 ### 8.4 自动化检查
 
-当前统一检查入口 `Scripts/ci/test.sh` 和 `Scripts/ci/verify.sh` 至少包含：
+当前构建前检查入口为 `Scripts/build.sh`；以下 Rust/Swift 专项测试按开发命令直接执行：
 
 ```text
 Rust operation/uploader unit and integration tests
@@ -330,7 +330,7 @@ AC-003/005/006/008 automated subset
 | Conflict v1 | 持久 conflict 和三种解决 service |
 | Removal v1 | dirty data 安全移除和 preserved location |
 | Provider 报告 | 每个 Provider 的 write/resume/zero-byte/crypto 证据 |
-| 自动化检查 | `Scripts/ci/test.sh`、`Scripts/ci/verify.sh` |
+| 自动化检查 | `Scripts/build.sh` 及 Rust/Swift 专项测试命令 |
 | 阶段报告 | `docs/reports/phase-2-exit.md` |
 
 ## 10. 阻断条件与完成定义

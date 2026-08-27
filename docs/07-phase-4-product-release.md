@@ -350,8 +350,8 @@ Release pipeline：
 
 ### 8.6 自动化检查
 
-Release 流程使用 `Scripts/ci/test.sh` 和 `Scripts/ci/verify.sh`；真实平台和发布
-证据仍通过独立环境任务提供：
+当前开发构建使用 `Scripts/build.sh` 的构建前检查；Release workflow 暂缓，真实平台和
+发布证据仍通过未来的独立环境任务提供：
 
 ```text
 all Rust/Swift/store/contract/File Provider tests

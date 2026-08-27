@@ -16,7 +16,7 @@ Phase 0 的本地实现、协议模型、故障注入单元测试、Swift Packag
 | Swift Domain/Auth/Store/Event/File Provider/Diagnostics | 通过 | 隔离 scratch/cache 执行 `swift test --disable-sandbox`，41 个测试通过 |
 | Xcode 工程 | 通过 | `xcodebuild -project NimbusSync.xcodeproj -scheme NimbusSync ... CODE_SIGNING_ALLOWED=NO build` |
 | 三个产品 Target | 可解析并构建 | `NimbusSync`、`NimbusSyncFileProvider`、`NimbusSyncFileProviderUI` |
-| Rust XCFramework | 通过 arm64 Debug/Release 构建 | `Scripts/xtask/build-xcframework.sh` |
+| Rust XCFramework | 暂缓，当前不作为构建验收项 | 产品集成完成后恢复 artifact pipeline |
 | Page/anchor 上限 | 通过 | Page token 和 sync anchor 单元测试；均限制在 500 bytes 内 |
 | SSE framing | 通过 | CRLF/LF、comment、多行 data、partial frame、CRLF 跨 chunk 测试 |
 | journal/outbox | 通过 | 同事务写入、重启语义模型、signal ack 测试 |

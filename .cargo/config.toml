@@ -1,3 +1,0 @@
-[alias]
-xtask = "run --manifest-path Rust/xtask/Cargo.toml --"
-

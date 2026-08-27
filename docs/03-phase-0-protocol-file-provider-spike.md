@@ -17,7 +17,7 @@ Cloudreve Windows 客户端依赖 CFAPI、路径型 inventory 和普通文件系
 
 ## 2. 阶段目标
 
-1. 建立可签名运行的 macOS App、File Provider Extension、File Provider UI Extension 和 Rust XCFramework 最小工程。
+1. 建立可签名运行的 macOS App、File Provider Extension、File Provider UI Extension 和 Rust FFI 最小工程。
 2. 对技术架构第 19 节的协议门禁逐项形成可复现证据和能力矩阵。
 3. 在真实 Finder 中跑通单 Domain 的枚举、完整下载、基础修改和 callback 重放。
 4. 验证稳定 root/item identity、合法 identifier、working-set signal、Domain version 和进程强杀恢复。
@@ -99,7 +99,7 @@ Cloudreve Windows 客户端依赖 CFAPI、路径型 inventory 和普通文件系
 | Entitlement | 配置 App Sandbox、outgoing network、App Group、Keychain Group、File Provider document group；Debug testing entitlement 与 Release 隔离 |
 | Domain | 使用 `crd-<uuid>`；显式设置 `supportsSyncingTrash = false`；不支持 external-volume/known-folder |
 | 最小 UI | App 只提供添加/移除测试 Domain、打开 Finder、展示最后错误，不做正式视觉设计 |
-| 自动化 | 由 `Scripts/ci/test.sh` 和 `Scripts/ci/verify.sh` 负责测试与仓库检查；真实 Cloudreve/Finder 验收属于外部环境任务 |
+| 自动化 | 由 `Scripts/build.sh` 负责构建前仓库检查；Rust/Swift 测试按开发命令直接执行，真实 Cloudreve/Finder 验收属于外部环境任务 |
 
 完成证据：三个产品 Target 可签名运行，Finder 可发现 Extension，Release 配置不含 testing entitlement。
 
@@ -110,7 +110,7 @@ Cloudreve Windows 客户端依赖 CFAPI、路径型 inventory 和普通文件系
 | `Rust/crates/cloudreve-protocol` | 迁移 site ping、OAuth、文件 info/list、content URL、SSE DTO 和结构化错误 |
 | `Rust/crates/cloudreve-core` | 提供 `validateSite`、`resolveRoot`、`listChildren`、`getItem`、`fetchContents`、最小 update 接口 |
 | `Rust/crates/cloudreve-ffi` | 只暴露版本化 DTO、async 方法、受控 FD 和错误，不暴露 Tokio/trait object/path |
-| `Scripts/xtask` | 构建 arm64/x86_64 静态库、UniFFI binding 和 XCFramework；生成 checksum |
+| `cloudreve-ffi` | 保留窄 FFI crate；静态库、UniFFI binding 和 XCFramework 打包暂缓 |
 
 实现约束：Spike 可使用临时内存 repository，但所有 ID、version 和错误 DTO 必须按最终接口设计，避免阶段 1 再破坏 FFI。
 
@@ -228,7 +228,7 @@ remote/SSE change
 
 - `cargo test --workspace` 通过；
 - Swift unit tests 和最小 File Provider integration tests 通过；
-- `cargo xtask build-xcframework` 对目标架构成功且 binding diff 干净；
+- Rust FFI 的 XCFramework pipeline 暂缓，不作为当前 Spike 的自动化验收项；
 - Rust/Swift 测试和仓库安全检查有独立可复用入口；真实 Cloudreve/Finder 验收由外部环境提供；
 - 外部能力证据不含 token、完整 signed URL、文件内容或真实敏感路径；
 - Release 配置扫描确认无 testing entitlement、HTTP 例外和关闭 TLS 验证选项。
@@ -257,11 +257,11 @@ remote/SSE change
 
 | 交付物 | 位置/形式 |
 |---|---|
-| 可运行 Spike | Xcode 三 Target + 最小 Rust XCFramework |
+| 可运行 Spike | Xcode 三 Target + Rust FFI crate；XCFramework 打包暂缓 |
 | File Provider tests | `Tests/FileProviderTests/` |
-| 历史聚合门禁 | 已退役；当前使用 `Scripts/ci/test.sh`、`Scripts/ci/verify.sh` |
+| 历史聚合门禁 | 已退役；当前使用 `Scripts/build.sh` 做构建前仓库检查 |
 | 能力矩阵 | 历史阶段 artifact；当前不由本地探测脚本生成 |
-| 故障注入报告 | 阶段历史记录；当前测试结果由 `Scripts/ci/test.sh` 产生 |
+| 故障注入报告 | 阶段历史记录；当前测试按 Rust/Swift 开发命令直接执行 |
 | 阶段结论 | `docs/reports/phase-0-exit.md` |
 
 ## 10. 阻断条件与退出规则

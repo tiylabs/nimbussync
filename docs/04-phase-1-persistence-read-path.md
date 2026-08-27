@@ -30,7 +30,7 @@
 - 阶段 0 为 Go 或 Conditional Go；
 - 最低 macOS、Cloudreve 基线和首批只读/可写能力矩阵已冻结；
 - 稳定 item/root identity 和分页策略已有实测结论；
-- Xcode Target、entitlement 和最小 XCFramework 可构建；
+- Xcode Target、entitlement 和 Rust FFI 边界已建立；XCFramework 打包暂缓；
 - 所有未通过能力都已有 fail-closed 行为。
 
 ### 3.2 允许存在
@@ -300,8 +300,8 @@ UI 只读 projection，不直接写同步表；命令调用 Domain/Auth service�
 
 ### 8.4 自动化检查
 
-阶段实现曾使用阶段聚合门禁；当前统一使用 `Scripts/ci/test.sh` 和
-`Scripts/ci/verify.sh`，至少运行：
+阶段实现曾使用阶段聚合门禁；当前由 `Scripts/build.sh` 执行构建前仓库检查，Rust/Swift
+测试和以下专项测试按开发命令直接运行：
 
 ```text
 cargo test --workspace
@@ -317,12 +317,12 @@ Release entitlement/config scan
 
 | 交付物 | 说明 |
 |---|---|
-| 生产工程骨架 | Xcode targets、Swift packages、Rust crates、XCFramework build |
+| 生产工程骨架 | Xcode targets、Swift packages、Rust crates、FFI 边界 |
 | Store v1 | registry/domain schema、migration、backup、repair/fencing |
 | Auth v1 | OAuth、Keychain、refresh、重新授权 |
 | Read path v1 | 多 Domain、枚举、完整下载、eviction、离线 snapshot |
 | 基础 UI | onboarding、添加 Domain、菜单栏状态、Finder 入口 |
-| 自动化检查 | `Scripts/ci/test.sh`、`Scripts/ci/verify.sh` |
+| 自动化检查 | `Scripts/build.sh` 及 Rust/Swift 专项测试命令 |
 | 阶段报告 | `docs/reports/phase-1-exit.md` |
 
 ## 10. 阻断条件与完成定义

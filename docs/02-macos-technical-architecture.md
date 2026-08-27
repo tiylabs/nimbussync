@@ -43,7 +43,7 @@ NimbusSync 采用原生多进程架构，连接自托管 Cloudreve 服务端：
 | 凭据 | Security.framework Keychain | token 和上传临时秘密不进入 SQLite、配置和日志 |
 | 跨进程通知 | Darwin Notification | 只传固定事件名；Domain UUID 作为数据库查询条件而非通知 payload |
 | 日志 | `OSLog` + Rust `tracing` + 可选轮转文件 | 统一 correlation ID 和脱敏规则 |
-| 构建 | Xcode 原生多 Target + Cargo `xtask` | 生成 universal XCFramework 并由 Xcode Targets 链接 |
+| 构建 | Xcode 原生多 Target + `Scripts/build.sh` | 构建前检查、App 打包；XCFramework 暂缓 |
 | 服务端基线 | Cloudreve v4.12+ | 仍须通过协议兼容门禁，版本号本身不等于能力证明 |
 | 发布 | Developer ID + notarized DMG | 首版不以 Mac App Store 为发布前提 |
 | 自动更新 | 1.x 再引入 | 1.0 不内置第三方更新框架 |
@@ -201,7 +201,7 @@ cloudreve-macos/
 │   ├── Release.xcconfig
 │   └── Entitlements/
 ├── Scripts/
-│   └── xtask/
+│   └── build.sh
 ├── Tests/
 │   ├── SwiftUnitTests/
 │   ├── RustTests/
@@ -219,7 +219,6 @@ cloudreve-macos/
 | `NimbusSyncFileProviderUI` | File Provider UI Extension | DomainKit、轻量 ActionRouter |
 | `NimbusSyncTests` | Unit Test Bundle | Swift 业务模块 |
 | `CloudreveFileProviderTests` | Unit/Integration Test Bundle | File Provider adapter 与测试服务器 |
-| `BuildCloudreveCore` | Aggregate/Script Target | Cargo `xtask build-xcframework` |
 
 App 和 File Provider 使用相同 App Group 与最小 Keychain Access Group。File Provider Target 的 `NSExtensionFileProviderDocumentGroup` 必须指向同一 App Group；缺少或不一致时 `NSFileProviderManager` 的存储与跨进程访问契约不成立。File Provider UI 不读取数据库或凭据，只通过 extension context 和 deep link 把 action 交给主应用。主应用以 `SMAppService.mainApp` 管理登录启动，不嵌入第二个常驻 helper。Debug 可启用 File Provider testing entitlement，Release 配置不得包含测试 entitlement。
 
@@ -1080,16 +1079,9 @@ auth_expired
 
 ### 17.1 Rust 构建
 
-`cargo xtask build-xcframework` 完成：
-
-1. 锁定 `rust-toolchain.toml`；
-2. 编译 `aarch64-apple-darwin` 和 `x86_64-apple-darwin`；
-3. 生成 UniFFI Swift bindings 和 module map；
-4. 生成 universal macOS library；
-5. 使用 `xcodebuild -create-xcframework` 生成 `CloudreveCore.xcframework`；
-6. 输出 artifact checksum 和 Rust 依赖许可清单。
-
-CI 必须验证生成 bindings 与 UDL/API 定义一致。Release 不在 Xcode Build Phase 中访问网络。
+Rust workspace 的测试和格式检查按开发命令直接执行。Rust FFI 的 XCFramework、
+UniFFI bindings 和 artifact checksum pipeline 暂缓，待产品集成完成后再恢复；当前
+`Scripts/build.sh` 不生成或嵌入 XCFramework。
 
 ### 17.2 Entitlements
 

@@ -5,7 +5,6 @@ members = [
     "crates/cloudreve-store",
     "crates/cloudreve-core",
     "crates/cloudreve-ffi",
-    "xtask",
 ]
 
 [workspace.package]
