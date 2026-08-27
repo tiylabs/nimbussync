@@ -2,6 +2,7 @@ import Foundation
 import FileProvider
 import UniformTypeIdentifiers
 import CryptoKit
+import OSLog
 import CloudreveAuthKit
 import CloudreveDomainKit
 import CloudreveStoreBridge
@@ -130,6 +131,7 @@ public final class NimbusSyncRemoteBackend: FileProviderBackend, @unchecked Send
     private let providerName: String
     private let secretVault: OpaqueSecretVault
     private let credentialRefresh: CredentialRefreshService
+    private let logger = Logger(subsystem: "ai.tiy.nimbussync", category: "file-provider-download")
 
     public init(origin: URL, rootURI: String, store: SQLiteStateStore, vault: CredentialVault, credentialReference: String, capabilitySnapshot: CapabilitySnapshot = CapabilitySnapshot(), providerName: String = "unverified", secretVault: OpaqueSecretVault, requestTimeout: TimeInterval = 60) {
         self.origin = origin
@@ -222,26 +224,47 @@ public final class NimbusSyncRemoteBackend: FileProviderBackend, @unchecked Send
     }
 
     public func fetchContent(identifier: String, expectedVersion: Data?, to destination: URL) throws -> RemoteItem {
-        guard let stored = try store.item(identifier: identifier), let remoteID = stored.remoteID else { throw CoreFailure(code: .notFound, retryable: false) }
-        guard stored.canRead else { throw CoreFailure(code: .permissionDenied, retryable: false, userActionRequired: true) }
-        if let expectedVersion, expectedVersion != stored.version.content { throw CoreFailure(code: .versionConflict, retryable: false, userActionRequired: true) }
-        let current = expectedVersion == nil ? try fetchRemoteItem(remoteID: remoteID, fallback: stored) : stored
-        guard current.canRead else { throw CoreFailure(code: .permissionDenied, retryable: false, userActionRequired: true) }
-        let fileURL: FileURLDTO = try request(path: "file/url", method: "POST", query: [], body: ["uris": [current.uri], "download": true, "redirect": false], authenticated: true)
-        guard let signedURL = fileURL.urls.first?.url,
-              let url = URL(string: signedURL),
-              url.scheme?.lowercased() == "https",
-              url.user == nil,
-              url.password == nil else {
-            throw CoreFailure(code: .unsupportedServer, retryable: false, userActionRequired: true)
+        var stage = "lookup_item"
+        do {
+            guard let stored = try store.item(identifier: identifier), let remoteID = stored.remoteID else { throw CoreFailure(code: .notFound, retryable: false) }
+            guard stored.canRead else { throw CoreFailure(code: .permissionDenied, retryable: false, userActionRequired: true) }
+            if let expectedVersion, expectedVersion != stored.version.content { throw CoreFailure(code: .versionConflict, retryable: false, userActionRequired: true) }
+            stage = "refresh_remote_metadata"
+            let current = expectedVersion == nil ? try fetchRemoteItem(remoteID: remoteID, fallback: stored) : stored
+            guard current.canRead else { throw CoreFailure(code: .permissionDenied, retryable: false, userActionRequired: true) }
+            stage = "request_download_url"
+            var urlRequest: [String: Any] = ["uris": [current.uri]]
+            if let entity = current.remoteVersion, !entity.isEmpty {
+                // Cloudreve uses primary_entity to bind the signed URL to the
+                // metadata version resolved immediately above.
+                urlRequest["entity"] = entity
+            }
+            let fileURL: FileURLDTO = try request(path: "file/url", method: "POST", query: [], body: urlRequest, authenticated: true)
+            guard let signedURL = fileURL.urls.first?.url,
+                  let url = URL(string: signedURL),
+                  url.scheme?.lowercased() == "https",
+                  url.user == nil,
+                  url.password == nil else {
+                throw CoreFailure(code: .unsupportedServer, retryable: false, userActionRequired: true, redactedContext: ["stage": "invalid-download-url"])
+            }
+            stage = "download-url"
+            try downloadWithoutBearer(url: url, to: destination, expectedSize: current.size)
+            stage = "verify_remote_version"
+            let refreshed = try fetchRemoteItem(remoteID: remoteID, fallback: current)
+            guard expectedVersion == nil || refreshed.version.content == current.version.content else {
+                try? FileManager.default.removeItem(at: destination)
+                throw CoreFailure(code: .versionConflict, retryable: false, userActionRequired: true)
+            }
+            logger.info("download.succeeded item=\(identifier, privacy: .public) bytes=\(current.size, privacy: .public)")
+            return refreshed
+        } catch {
+            if let failure = error as? CoreFailure {
+                logger.error("download.failed item=\(identifier, privacy: .public) stage=\(stage, privacy: .public) code=\(failure.code.rawValue, privacy: .public) retryable=\(failure.retryable, privacy: .public) correlation=\(failure.correlationID.uuidString, privacy: .public)")
+            } else {
+                logger.error("download.failed item=\(identifier, privacy: .public) stage=\(stage, privacy: .public) error=\(String(describing: error), privacy: .public)")
+            }
+            throw error
         }
-        try downloadWithoutBearer(url: url, to: destination, expectedSize: current.size)
-        let refreshed = try fetchRemoteItem(remoteID: remoteID, fallback: current)
-        guard expectedVersion == nil || refreshed.version.content == current.version.content else {
-            try? FileManager.default.removeItem(at: destination)
-            throw CoreFailure(code: .versionConflict, retryable: false, userActionRequired: true)
-        }
-        return refreshed
     }
 
     public func create(template: RemoteItem, content: Data?, replayKey: String) throws -> RemoteItem {
@@ -523,13 +546,13 @@ public final class NimbusSyncRemoteBackend: FileProviderBackend, @unchecked Send
 
     private func makeItem(_ dto: RemoteFileDTO, parentIdentifier: String, itemIdentifier: String? = nil) throws -> RemoteItem {
         try validateURI(dto.path)
-        let primary = dto.primaryEntity ?? dto.updatedAt ?? dto.createdAt ?? dto.id
+        let contentRevision = dto.primaryEntity ?? dto.updatedAt ?? dto.createdAt ?? dto.id
         let isFolder = dto.type == 1
         let writable = capabilitySnapshot.canWrite(provider: providerName) && (dto.capability?.contains("w") ?? false)
         let trashable = writable && capabilitySnapshot.trashRestore == .verified
         let readable = dto.permission.map { $0.contains("r") } ?? true
         let remoteDeletable = dto.capability?.contains("d") ?? false
-        return RemoteItem(itemIdentifier: itemIdentifier ?? CloudreveIdentifier.item(), remoteID: dto.id, parentIdentifier: parentIdentifier, name: dto.name, uri: dto.path, kind: isFolder ? .folder : .file, contentType: isFolder ? UTType.folder.identifier : UTType.data.identifier, size: max(0, dto.size ?? 0), remoteVersion: primary, version: ItemVersion(content: VersionHasher.content(primaryEntity: primary), metadata: VersionHasher.metadata(parent: parentIdentifier, name: dto.name, kind: isFolder ? .folder : .file, permissionBits: readable ? 1 : 0, revision: dto.updatedAt)), creationDate: parseRemoteDate(dto.createdAt), contentModificationDate: parseRemoteDate(dto.updatedAt), canRead: readable, canWrite: writable && readable, canAddChildren: writable && readable && isFolder, canTrash: trashable && readable && remoteDeletable, canDelete: trashable && readable && remoteDeletable)
+        return RemoteItem(itemIdentifier: itemIdentifier ?? CloudreveIdentifier.item(), remoteID: dto.id, parentIdentifier: parentIdentifier, name: dto.name, uri: dto.path, kind: isFolder ? .folder : .file, contentType: isFolder ? UTType.folder.identifier : UTType.data.identifier, size: max(0, dto.size ?? 0), remoteVersion: dto.primaryEntity, version: ItemVersion(content: VersionHasher.content(primaryEntity: contentRevision), metadata: VersionHasher.metadata(parent: parentIdentifier, name: dto.name, kind: isFolder ? .folder : .file, permissionBits: readable ? 1 : 0, revision: dto.updatedAt)), creationDate: parseRemoteDate(dto.createdAt), contentModificationDate: parseRemoteDate(dto.updatedAt), canRead: readable, canWrite: writable && readable, canAddChildren: writable && readable && isFolder, canTrash: trashable && readable && remoteDeletable, canDelete: trashable && readable && remoteDeletable)
     }
 
     private func request<Value: Decodable>(path: String, method: String, query: [URLQueryItem], body: [String: Any]?, authenticated: Bool) throws -> Value {
@@ -545,9 +568,15 @@ public final class NimbusSyncRemoteBackend: FileProviderBackend, @unchecked Send
         }
         let (data, response) = try perform(request)
         guard let httpResponse = response as? HTTPURLResponse else { throw CoreFailure(code: .network, retryable: true) }
-        guard (200..<300).contains(httpResponse.statusCode) else { throw mapHTTPStatus(httpResponse.statusCode) }
+        guard (200..<300).contains(httpResponse.statusCode) else {
+            logger.error("api.failed path=\(path, privacy: .public) http_status=\(httpResponse.statusCode, privacy: .public)")
+            throw mapHTTPStatus(httpResponse.statusCode)
+        }
         let envelope = try JSONDecoder().decode(APIEnvelope<Value>.self, from: data)
-        guard envelope.code == 0 else { throw mapAPIError(envelope.code) }
+        guard envelope.code == 0 else {
+            logger.error("api.failed path=\(path, privacy: .public) api_code=\(envelope.code, privacy: .public)")
+            throw mapAPIError(envelope.code)
+        }
         if let value = envelope.data { return value }
         if Value.self == EmptyResponse.self, let empty = EmptyResponse() as? Value { return empty }
         throw CoreFailure(code: .unknownOutcome, retryable: false)
@@ -613,12 +642,20 @@ public final class NimbusSyncRemoteBackend: FileProviderBackend, @unchecked Send
         }
         task.resume()
         guard semaphore.wait(timeout: .now() + requestTimeout) == .success else { task.cancel(); throw CoreFailure(code: .network, retryable: true) }
-        if result.error != nil { throw CoreFailure(code: .network, retryable: true, redactedContext: ["error": "url_session"]) }
+        if result.error != nil {
+            logger.error("download.url_failed reason=url_session")
+            throw CoreFailure(code: .network, retryable: true, redactedContext: ["error": "url_session"])
+        }
         guard let response = result.response as? HTTPURLResponse, (200..<300).contains(response.statusCode) else {
             try? FileManager.default.removeItem(at: destination)
+            let status = (result.response as? HTTPURLResponse)?.statusCode ?? 0
+            logger.error("download.url_failed reason=http_status status=\(status, privacy: .public)")
             throw CoreFailure(code: .network, retryable: true)
         }
-        guard let temporaryURL = result.temporaryURL else { throw CoreFailure(code: .network, retryable: true) }
+        guard let temporaryURL = result.temporaryURL else {
+            logger.error("download.url_failed reason=missing_temporary_file")
+            throw CoreFailure(code: .network, retryable: true)
+        }
         let input = try FileHandle(forReadingFrom: temporaryURL)
         let output = try FileHandle(forWritingTo: destination)
         defer { try? input.close(); try? output.close(); try? FileManager.default.removeItem(at: temporaryURL) }
@@ -629,6 +666,7 @@ public final class NimbusSyncRemoteBackend: FileProviderBackend, @unchecked Send
         }
         guard total == expectedSize else {
             try? FileManager.default.removeItem(at: destination)
+            logger.error("download.url_failed reason=size_mismatch expected=\(expectedSize, privacy: .public) actual=\(total, privacy: .public)")
             throw CoreFailure(code: .integrityFailure, retryable: true)
         }
     }

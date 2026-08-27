@@ -279,7 +279,7 @@ private final class FetchCompletion: @unchecked Sendable {
     }
 }
 
-open class NimbusSyncFileProviderExtension: NSObject, NSFileProviderReplicatedExtension, NSFileProviderDomainState, NSFileProviderThumbnailing, NSFileProviderCustomAction, @unchecked Sendable {
+open class NimbusSyncFileProviderExtension: NSObject, NSFileProviderDomainState, NSFileProviderThumbnailing, NSFileProviderCustomAction, @unchecked Sendable {
     public let domain: NSFileProviderDomain
     private var store: SQLiteStateStore?
     private var backend: FileProviderBackend

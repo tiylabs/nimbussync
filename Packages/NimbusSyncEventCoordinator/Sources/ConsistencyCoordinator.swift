@@ -137,10 +137,10 @@ public final class CloudreveEventEnricher: RemoteEventEnricher, @unchecked Senda
         let existingIdentifier = try store.itemIdentifier(forRemoteID: remoteID)
         let parentIdentifier = try await parentIdentifier(for: file.path, existingIdentifier: existingIdentifier)
         let kind: RemoteItemKind = file.type == 1 ? .folder : .file
-        let primary = file.primaryEntity ?? file.updatedAt ?? file.createdAt ?? file.id
+        let contentRevision = file.primaryEntity ?? file.updatedAt ?? file.createdAt ?? file.id
         let readable = file.permission.map { $0.contains("r") } ?? true
         let writable = file.capability.map { $0.contains("w") } ?? false
-        let item = RemoteItem(itemIdentifier: existingIdentifier ?? CloudreveIdentifier.item(), remoteID: file.id, parentIdentifier: parentIdentifier, name: file.name, uri: file.path, kind: kind, contentType: kind == .folder ? "public.folder" : "public.data", size: max(0, file.size ?? 0), remoteVersion: primary, version: ItemVersion(content: VersionHasher.content(primaryEntity: primary), metadata: VersionHasher.metadata(parent: parentIdentifier, name: file.name, kind: kind, permissionBits: readable ? 1 : 0, revision: file.updatedAt)), creationDate: parseEventDate(file.createdAt), contentModificationDate: parseEventDate(file.updatedAt), canRead: readable, canWrite: writable && readable, canAddChildren: writable && readable && kind == .folder, canTrash: writable && readable && (file.capability?.contains("d") ?? false), canDelete: false)
+        let item = RemoteItem(itemIdentifier: existingIdentifier ?? CloudreveIdentifier.item(), remoteID: file.id, parentIdentifier: parentIdentifier, name: file.name, uri: file.path, kind: kind, contentType: kind == .folder ? "public.folder" : "public.data", size: max(0, file.size ?? 0), remoteVersion: file.primaryEntity, version: ItemVersion(content: VersionHasher.content(primaryEntity: contentRevision), metadata: VersionHasher.metadata(parent: parentIdentifier, name: file.name, kind: kind, permissionBits: readable ? 1 : 0, revision: file.updatedAt)), creationDate: parseEventDate(file.createdAt), contentModificationDate: parseEventDate(file.updatedAt), canRead: readable, canWrite: writable && readable, canAddChildren: writable && readable && kind == .folder, canTrash: writable && readable && (file.capability?.contains("d") ?? false), canDelete: false)
         return EnrichedRemoteChange(item: item, oldParentIdentifier: existingIdentifier.flatMap { try? store.item(identifier: $0)?.parentIdentifier }, newParentIdentifier: parentIdentifier, kind: hint.kind.rawValue)
     }
 
@@ -345,10 +345,10 @@ public final class CloudreveReconciliationService: @unchecked Sendable {
 
     private func makeItem(_ file: EventFileDTO, parentIdentifier: String, itemIdentifier: String) throws -> RemoteItem {
         let kind: RemoteItemKind = file.type == 1 ? .folder : .file
-        let primary = file.primaryEntity ?? file.updatedAt ?? file.createdAt ?? file.id
+        let contentRevision = file.primaryEntity ?? file.updatedAt ?? file.createdAt ?? file.id
         let readable = file.permission.map { $0.contains("r") } ?? true
         let writable = file.capability.map { $0.contains("w") } ?? false
-        return RemoteItem(itemIdentifier: itemIdentifier, remoteID: file.id, parentIdentifier: parentIdentifier, name: file.name, uri: file.path, kind: kind, contentType: kind == .folder ? "public.folder" : "public.data", size: max(0, file.size ?? 0), remoteVersion: primary, version: ItemVersion(content: VersionHasher.content(primaryEntity: primary), metadata: VersionHasher.metadata(parent: parentIdentifier, name: file.name, kind: kind, permissionBits: readable ? 1 : 0, revision: file.updatedAt)), creationDate: parseEventDate(file.createdAt), contentModificationDate: parseEventDate(file.updatedAt), canRead: readable, canWrite: writable && readable, canAddChildren: writable && readable && kind == .folder, canTrash: false, canDelete: false)
+        return RemoteItem(itemIdentifier: itemIdentifier, remoteID: file.id, parentIdentifier: parentIdentifier, name: file.name, uri: file.path, kind: kind, contentType: kind == .folder ? "public.folder" : "public.data", size: max(0, file.size ?? 0), remoteVersion: file.primaryEntity, version: ItemVersion(content: VersionHasher.content(primaryEntity: contentRevision), metadata: VersionHasher.metadata(parent: parentIdentifier, name: file.name, kind: kind, permissionBits: readable ? 1 : 0, revision: file.updatedAt)), creationDate: parseEventDate(file.createdAt), contentModificationDate: parseEventDate(file.updatedAt), canRead: readable, canWrite: writable && readable, canAddChildren: writable && readable && kind == .folder, canTrash: false, canDelete: false)
     }
 }
 

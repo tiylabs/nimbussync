@@ -22,6 +22,8 @@
         <string>$(PRODUCT_MODULE_NAME).FileProviderExtension</string>
         <key>NSExtensionFileProviderDocumentGroup</key>
         <string>$(APP_GROUP_IDENTIFIER)</string>
+        <key>NSExtensionFileProviderSupportsEnumeration</key>
+        <true/>
         <key>NSExtensionFileProviderDownloadPipelineDepth</key>
         <integer>2</integer>
         <key>NSExtensionFileProviderMetadataOnlyUploadPipelineDepth</key>

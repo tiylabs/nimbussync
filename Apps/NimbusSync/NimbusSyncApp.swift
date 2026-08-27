@@ -52,6 +52,7 @@ struct NimbusSyncApp: App {
         SettingsView(
             domains: runtime.snapshot.domains,
             notificationPreferences: runtime.snapshot.notificationPreferences,
+            finderError: Binding<String?>(get: { runtime.finderError }, set: { runtime.finderError = $0 }),
             onOpenFinder: runtime.openFinder,
             onRemove: runtime.removeDomain,
             onOpenWeb: runtime.openWeb,
@@ -495,12 +496,50 @@ private struct PendingDomainSetup {
     let remotePath: String
 }
 
+private enum FinderOpenError: LocalizedError {
+    case provider(stage: String, domain: String, code: Int)
+    case managerUnavailable
+    case domainNotRegistered
+    case visibleURLUnavailable
+    case workspaceRejected
+
+    var errorDescription: String? {
+        switch self {
+        case let .provider(stage, domain, code):
+            if code == 4099 {
+                "The File Provider extension exited while starting (\(domain) \(code), stage: \(stage))."
+            } else if code == 513 {
+                "The File Provider document storage is not writable (\(domain) \(code))."
+            } else {
+                "The File Provider request failed at \(stage) (\(domain) \(code))."
+            }
+        case .managerUnavailable:
+            "The File Provider manager is unavailable."
+        case .domainNotRegistered:
+            "This domain is not currently registered with File Provider. Reopen NimbusSync or reconnect the domain."
+        case .visibleURLUnavailable:
+            "The domain does not have a Finder location yet."
+        case .workspaceRejected:
+            "Finder did not accept the domain location."
+        }
+    }
+}
+
+private final class FinderSystemDomainBox: @unchecked Sendable {
+    let domain: NSFileProviderDomain
+
+    init(_ domain: NSFileProviderDomain) {
+        self.domain = domain
+    }
+}
+
 @MainActor
 private final class NimbusSyncAppState: ObservableObject {
     @Published var snapshot = ProductSnapshot()
     @Published var isAuthorizing = false
     @Published var isProvisioningDomain = false
     @Published var onboardingError: String?
+    @Published var finderError: String?
     @Published fileprivate var pendingDomainSetup: PendingDomainSetup?
     @Published var selectedConflictItemIdentifier: String?
     var onDomainProvisioned: ((DomainDescriptor) -> Void)?
@@ -817,38 +856,124 @@ private final class NimbusSyncAppState: ObservableObject {
     }
 
     func openFinder(domain: DomainDescriptor) {
-        let identifier = NSFileProviderDomainIdentifier(domain.identifier)
-        NSFileProviderManager.getDomainsWithCompletionHandler { [weak self] domains, error in
-            if let error {
-                self?.lifecycleLogger.error("finder.open_failed stage=list_domains error=\(error.localizedDescription, privacy: .public)")
-                return
-            }
-            guard let systemDomain = domains.first(where: { $0.identifier == identifier }),
-                  let manager = NSFileProviderManager(for: systemDomain) else {
-                self?.lifecycleLogger.error("finder.open_failed stage=resolve_domain")
-                return
-            }
-            manager.getUserVisibleURL(for: .rootContainer) { [weak self] url, error in
-                if let error {
-                    self?.lifecycleLogger.error("finder.open_failed stage=visible_url error=\(error.localizedDescription, privacy: .public)")
-                    return
+        finderError = nil
+        let displayName = domain.displayName
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let systemDomain = try await self.resolveSystemDomain(for: domain)
+                guard let manager = NSFileProviderManager(for: systemDomain) else {
+                    throw FinderOpenError.managerUnavailable
                 }
-                guard let url else {
-                    self?.lifecycleLogger.error("finder.open_failed stage=visible_url_missing")
-                    return
+                if systemDomain.isDisconnected {
+                    try await self.reconnect(manager)
                 }
-                DispatchQueue.main.async {
-                    let configuration = NSWorkspace.OpenConfiguration()
-                    configuration.activates = true
-                    NSWorkspace.shared.open(url, configuration: configuration) { _, error in
-                        if let error {
-                            Logger(subsystem: "ai.tiy.nimbussync", category: "lifecycle")
-                                .error("finder.open_failed stage=workspace_open error=\(error.localizedDescription, privacy: .public)")
-                        }
+                let url = try await self.userVisibleURL(for: manager)
+                try self.activateFinder(at: url)
+                self.lifecycleLogger.info("finder.open_succeeded domain=\(domain.identifier, privacy: .public)")
+            } catch {
+                self.reportFinderFailure(error, displayName: displayName)
+            }
+        }
+    }
+
+    private func resolveSystemDomain(for descriptor: DomainDescriptor) async throws -> NSFileProviderDomain {
+        let identifier = NSFileProviderDomainIdentifier(descriptor.identifier)
+        for attempt in 0..<3 {
+            let registeredDomain = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<FinderSystemDomainBox?, Error>) in
+                NSFileProviderManager.getDomainsWithCompletionHandler { domains, error in
+                    if let error {
+                        let nsError = error as NSError
+                        continuation.resume(throwing: FinderOpenError.provider(stage: "list_domains", domain: nsError.domain, code: nsError.code))
+                    } else {
+                        continuation.resume(returning: domains.first(where: { $0.identifier == identifier }).map(FinderSystemDomainBox.init))
                     }
                 }
             }
+            if let registeredDomain {
+                return registeredDomain.domain
+            }
+            if attempt < 2 {
+                try await Task.sleep(nanoseconds: UInt64(250_000_000 * (attempt + 1)))
+            }
         }
+        throw FinderOpenError.domainNotRegistered
+    }
+
+    private func userVisibleURL(for manager: NSFileProviderManager) async throws -> URL {
+        var lastError: FinderOpenError?
+        for attempt in 0..<3 {
+            do {
+                return try await userVisibleURLOnce(for: manager)
+            } catch let error as FinderOpenError {
+                lastError = error
+                if attempt < 2 {
+                    try await Task.sleep(nanoseconds: UInt64(250_000_000 * (attempt + 1)))
+                }
+            }
+        }
+        throw lastError ?? FinderOpenError.visibleURLUnavailable
+    }
+
+    private func userVisibleURLOnce(for manager: NSFileProviderManager) async throws -> URL {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<URL, Error>) in
+            manager.getUserVisibleURL(for: .rootContainer) { url, error in
+                if let error {
+                    let nsError = error as NSError
+                    continuation.resume(throwing: FinderOpenError.provider(stage: "visible_url", domain: nsError.domain, code: nsError.code))
+                } else if let url, url.isFileURL, !url.path.isEmpty {
+                    continuation.resume(returning: url)
+                } else {
+                    continuation.resume(throwing: FinderOpenError.visibleURLUnavailable)
+                }
+            }
+        }
+    }
+
+    private func reconnect(_ manager: NSFileProviderManager) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            manager.reconnect { error in
+                if let error {
+                    let nsError = error as NSError
+                    continuation.resume(throwing: FinderOpenError.provider(stage: "reconnect", domain: nsError.domain, code: nsError.code))
+                } else {
+                    continuation.resume()
+                }
+            }
+        }
+    }
+
+    private func activateFinder(at url: URL) throws {
+        let startedAccessing = url.startAccessingSecurityScopedResource()
+        defer {
+            if startedAccessing {
+                url.stopAccessingSecurityScopedResource()
+            }
+        }
+        guard NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: url.path) else {
+            throw FinderOpenError.workspaceRejected
+        }
+    }
+
+    private func reportFinderFailure(_ error: Error, displayName: String) {
+        if let failure = error as? FinderOpenError {
+            switch failure {
+            case let .provider(stage, domain, code):
+                lifecycleLogger.error("finder.open_failed stage=\(stage, privacy: .public) error_domain=\(domain, privacy: .public) error_code=\(code, privacy: .public)")
+            case .managerUnavailable:
+                lifecycleLogger.error("finder.open_failed stage=resolve_manager")
+            case .domainNotRegistered:
+                lifecycleLogger.error("finder.open_failed stage=resolve_domain")
+            case .visibleURLUnavailable:
+                lifecycleLogger.error("finder.open_failed stage=visible_url_missing")
+            case .workspaceRejected:
+                lifecycleLogger.error("finder.open_failed stage=workspace_select")
+            }
+            finderError = "Unable to open \(displayName) in Finder. \(failure.errorDescription ?? "The File Provider location is unavailable.")"
+            return
+        }
+        lifecycleLogger.error("finder.open_failed stage=unknown error=\(String(describing: error), privacy: .public)")
+        finderError = "Unable to open \(displayName) in Finder. Please try again after reopening NimbusSync."
     }
 
     func openWeb(domain: DomainDescriptor) {
@@ -998,6 +1123,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
 private struct SettingsView: View {
     let domains: [DomainDescriptor]
     let persistedNotificationPreferences: NotificationPreferences
+    @Binding var finderError: String?
     let onOpenFinder: (DomainDescriptor) -> Void
     let onRemove: (DomainDescriptor) -> Void
     let onOpenWeb: (DomainDescriptor) -> Void
@@ -1009,9 +1135,10 @@ private struct SettingsView: View {
     @State private var notificationPreferences: NotificationPreferences
     @State private var pendingRemoval: DomainDescriptor?
 
-    init(domains: [DomainDescriptor], notificationPreferences: NotificationPreferences, onOpenFinder: @escaping (DomainDescriptor) -> Void, onRemove: @escaping (DomainDescriptor) -> Void, onOpenWeb: @escaping (DomainDescriptor) -> Void, onReauthorize: @escaping (DomainDescriptor) -> Void, onNotificationsChanged: @escaping (NotificationPreferences) -> Void, onAddDomain: @escaping () -> Void) {
+    init(domains: [DomainDescriptor], notificationPreferences: NotificationPreferences, finderError: Binding<String?>, onOpenFinder: @escaping (DomainDescriptor) -> Void, onRemove: @escaping (DomainDescriptor) -> Void, onOpenWeb: @escaping (DomainDescriptor) -> Void, onReauthorize: @escaping (DomainDescriptor) -> Void, onNotificationsChanged: @escaping (NotificationPreferences) -> Void, onAddDomain: @escaping () -> Void) {
         self.domains = domains
         persistedNotificationPreferences = notificationPreferences
+        _finderError = finderError
         self.onOpenFinder = onOpenFinder
         self.onRemove = onRemove
         self.onOpenWeb = onOpenWeb
@@ -1022,16 +1149,9 @@ private struct SettingsView: View {
     }
 
     var body: some View {
-        HStack(spacing: 0) {
-            List(SettingsSection.allCases, selection: $selectedSection) { section in
-                Label(section.title, systemImage: section.symbol)
-                    .tag(section)
-            }
-            .listStyle(.sidebar)
-            .safeAreaInset(edge: .top, spacing: 0) {
-                Color.clear.frame(height: 12)
-            }
-            .frame(minWidth: 200, idealWidth: 220, maxWidth: 240)
+        HStack(alignment: .top, spacing: 0) {
+            SettingsSidebar(selectedSection: $selectedSection)
+                .frame(minWidth: 200, idealWidth: 220, maxWidth: 240)
 
             Divider()
 
@@ -1039,6 +1159,7 @@ private struct SettingsView: View {
                 .id(selectedSection)
         }
         .frame(minWidth: 760, idealWidth: 860, minHeight: 520, idealHeight: 600)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .onChange(of: persistedNotificationPreferences) { value in
             notificationPreferences = value
         }
@@ -1047,6 +1168,11 @@ private struct SettingsView: View {
             Button("Cancel", role: .cancel) { pendingRemoval = nil }
         } message: { _ in
             Text("Remote files will not be deleted. Dirty local data may be preserved by File Provider.")
+        }
+        .alert("Unable to open Finder", isPresented: Binding(get: { finderError != nil }, set: { if !$0 { finderError = nil } })) {
+            Button("OK", role: .cancel) { finderError = nil }
+        } message: {
+            Text(finderError ?? "The File Provider location is unavailable.")
         }
     }
 
@@ -1184,6 +1310,36 @@ private struct SettingsView: View {
     }
 }
 
+private struct SettingsSidebar: View {
+    @Binding var selectedSection: SettingsSection
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(SettingsSection.allCases) { section in
+                Button {
+                    selectedSection = section
+                } label: {
+                    Label(section.title, systemImage: section.symbol)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(selectedSection == section ? .white : .primary)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background {
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(selectedSection == section ? Color.accentColor : .clear)
+                }
+                .contentShape(Rectangle())
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12)
+        .padding(.top, 12)
+        .padding(.bottom, 12)
+    }
+}
+
 private struct SettingsPage<Content: View>: View {
     let title: String
     let description: String
@@ -1205,6 +1361,7 @@ private struct SettingsPage<Content: View>: View {
             Form(content: content)
                 .formStyle(.grouped)
                 .scrollContentBackground(.hidden)
+                .frame(maxWidth: .infinity, minHeight: 160, alignment: .topLeading)
         }
         .padding(.horizontal, 28)
         .padding(.top, 28)
