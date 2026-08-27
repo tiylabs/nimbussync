@@ -24,6 +24,22 @@ public protocol CredentialVault: Sendable {
 
 public enum CredentialVaultError: Error, Equatable { case unavailable, invalidData, duplicate, unexpectedStatus(OSStatus) }
 
+private func sharedKeychainQuery(service: String, account: String, accessGroup: String?, returningData: Bool = false) throws -> [CFString: Any] {
+    guard let accessGroup, !accessGroup.isEmpty else { throw CredentialVaultError.unavailable }
+    var query: [CFString: Any] = [
+        kSecClass: kSecClassGenericPassword,
+        kSecAttrService: service,
+        kSecAttrAccount: account,
+        kSecAttrAccessGroup: accessGroup,
+        kSecUseDataProtectionKeychain: true
+    ]
+    if returningData {
+        query[kSecReturnData] = true
+        query[kSecMatchLimit] = kSecMatchLimitOne
+    }
+    return query
+}
+
 public enum KeychainAccessGroup {
     public static func current(suffix: String = "ai.tiy.nimbussync") -> String? {
         guard let task = SecTaskCreateFromSelf(nil), let value = SecTaskCopyValueForEntitlement(task, "keychain-access-groups" as CFString, nil) as? [String] else { return nil }
@@ -51,8 +67,7 @@ public final class KeychainOpaqueSecretVault: OpaqueSecretVault, @unchecked Send
     public init(accessGroup: String? = nil) { self.accessGroup = accessGroup }
 
     public func readSecret(reference: String) throws -> String? {
-        var query: [CFString: Any] = [kSecClass: kSecClassGenericPassword, kSecAttrService: "NimbusSync.TransferSecret", kSecAttrAccount: reference, kSecReturnData: true, kSecMatchLimit: kSecMatchLimitOne]
-        if let accessGroup { query[kSecAttrAccessGroup] = accessGroup }
+        let query = try sharedKeychainQuery(service: "NimbusSync.TransferSecret", account: reference, accessGroup: accessGroup, returningData: true)
         var result: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
         if status == errSecItemNotFound { return nil }
@@ -62,8 +77,7 @@ public final class KeychainOpaqueSecretVault: OpaqueSecretVault, @unchecked Send
     }
 
     public func writeSecret(_ secret: String, reference: String) throws {
-        var query: [CFString: Any] = [kSecClass: kSecClassGenericPassword, kSecAttrService: "NimbusSync.TransferSecret", kSecAttrAccount: reference]
-        if let accessGroup { query[kSecAttrAccessGroup] = accessGroup }
+        let query = try sharedKeychainQuery(service: "NimbusSync.TransferSecret", account: reference, accessGroup: accessGroup)
         let data = Data(secret.utf8)
         let attributes: [CFString: Any] = [kSecValueData: data, kSecAttrAccessible: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly]
         let status = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
@@ -76,8 +90,7 @@ public final class KeychainOpaqueSecretVault: OpaqueSecretVault, @unchecked Send
     }
 
     public func removeSecret(reference: String) throws {
-        var query: [CFString: Any] = [kSecClass: kSecClassGenericPassword, kSecAttrService: "NimbusSync.TransferSecret", kSecAttrAccount: reference]
-        if let accessGroup { query[kSecAttrAccessGroup] = accessGroup }
+        let query = try sharedKeychainQuery(service: "NimbusSync.TransferSecret", account: reference, accessGroup: accessGroup)
         let status = SecItemDelete(query as CFDictionary)
         guard status == errSecSuccess || status == errSecItemNotFound else { throw CredentialVaultError.unexpectedStatus(status) }
     }
@@ -128,8 +141,7 @@ public final class KeychainCredentialVault: CredentialVault, @unchecked Sendable
     public init(accessGroup: String? = nil) { self.accessGroup = accessGroup }
 
     public func read(reference: String) throws -> Credential? {
-        var query: [CFString: Any] = [kSecClass: kSecClassGenericPassword, kSecAttrService: "NimbusSync.Credential", kSecAttrAccount: reference, kSecReturnData: true, kSecMatchLimit: kSecMatchLimitOne]
-        if let accessGroup { query[kSecAttrAccessGroup] = accessGroup }
+        let query = try sharedKeychainQuery(service: "NimbusSync.Credential", account: reference, accessGroup: accessGroup, returningData: true)
         var result: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
         if status == errSecItemNotFound { return nil }
@@ -140,8 +152,7 @@ public final class KeychainCredentialVault: CredentialVault, @unchecked Sendable
 
     public func write(_ credential: Credential, reference: String) throws {
         let data = try JSONEncoder().encode(credential)
-        var query: [CFString: Any] = [kSecClass: kSecClassGenericPassword, kSecAttrService: "NimbusSync.Credential", kSecAttrAccount: reference]
-        if let accessGroup { query[kSecAttrAccessGroup] = accessGroup }
+        let query = try sharedKeychainQuery(service: "NimbusSync.Credential", account: reference, accessGroup: accessGroup)
         let attributes: [CFString: Any] = [kSecValueData: data, kSecAttrAccessible: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly]
         let updateStatus = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
         if updateStatus == errSecItemNotFound {
@@ -154,8 +165,7 @@ public final class KeychainCredentialVault: CredentialVault, @unchecked Sendable
     }
 
     public func remove(reference: String) throws {
-        var query: [CFString: Any] = [kSecClass: kSecClassGenericPassword, kSecAttrService: "NimbusSync.Credential", kSecAttrAccount: reference]
-        if let accessGroup { query[kSecAttrAccessGroup] = accessGroup }
+        let query = try sharedKeychainQuery(service: "NimbusSync.Credential", account: reference, accessGroup: accessGroup)
         let status = SecItemDelete(query as CFDictionary)
         guard status == errSecSuccess || status == errSecItemNotFound else { throw CredentialVaultError.unexpectedStatus(status) }
     }

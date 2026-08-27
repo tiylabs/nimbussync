@@ -53,7 +53,9 @@ struct NimbusSyncApp: App {
             domains: runtime.snapshot.domains,
             notificationPreferences: runtime.snapshot.notificationPreferences,
             finderError: Binding<String?>(get: { runtime.finderError }, set: { runtime.finderError = $0 }),
+            finderSettingsActionAvailable: Binding(get: { runtime.finderSettingsActionAvailable }, set: { runtime.finderSettingsActionAvailable = $0 }),
             onOpenFinder: runtime.openFinder,
+            onOpenFileProviderSettings: runtime.openFileProviderSettings,
             onRemove: runtime.removeDomain,
             onOpenWeb: runtime.openWeb,
             onReauthorize: runtime.reauthorize,
@@ -498,6 +500,7 @@ private struct PendingDomainSetup {
 
 private enum FinderOpenError: LocalizedError {
     case provider(stage: String, domain: String, code: Int)
+    case userDisabled
     case managerUnavailable
     case domainNotRegistered
     case visibleURLUnavailable
@@ -506,13 +509,17 @@ private enum FinderOpenError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case let .provider(stage, domain, code):
-            if code == 4099 {
+            if isDomainDisabledError(domain: domain, code: code) {
+                "This domain is disabled in System Settings. Enable it under General > Login Items & Extensions > File Providers, then try again."
+            } else if code == 4099 {
                 "The File Provider extension exited while starting (\(domain) \(code), stage: \(stage))."
             } else if code == 513 {
                 "The File Provider document storage is not writable (\(domain) \(code))."
             } else {
                 "The File Provider request failed at \(stage) (\(domain) \(code))."
             }
+        case .userDisabled:
+            "This domain is disabled in System Settings. Enable it under General > Login Items & Extensions > File Providers, then try again."
         case .managerUnavailable:
             "The File Provider manager is unavailable."
         case .domainNotRegistered:
@@ -523,6 +530,11 @@ private enum FinderOpenError: LocalizedError {
             "Finder did not accept the domain location."
         }
     }
+}
+
+private func isDomainDisabledError(domain: String, code: Int) -> Bool {
+    (domain == NSFileProviderErrorDomain && code == -2011) ||
+        (domain == "NSFileProviderInternalErrorDomain" && code == 12)
 }
 
 private final class FinderSystemDomainBox: @unchecked Sendable {
@@ -540,6 +552,7 @@ private final class NimbusSyncAppState: ObservableObject {
     @Published var isProvisioningDomain = false
     @Published var onboardingError: String?
     @Published var finderError: String?
+    @Published var finderSettingsActionAvailable = false
     @Published fileprivate var pendingDomainSetup: PendingDomainSetup?
     @Published var selectedConflictItemIdentifier: String?
     var onDomainProvisioned: ((DomainDescriptor) -> Void)?
@@ -857,6 +870,7 @@ private final class NimbusSyncAppState: ObservableObject {
 
     func openFinder(domain: DomainDescriptor) {
         finderError = nil
+        finderSettingsActionAvailable = false
         let displayName = domain.displayName
         Task { [weak self] in
             guard let self else { return }
@@ -891,7 +905,27 @@ private final class NimbusSyncAppState: ObservableObject {
                 }
             }
             if let registeredDomain {
-                return registeredDomain.domain
+                guard registeredDomain.domain.userEnabled else {
+                    throw FinderOpenError.userDisabled
+                }
+
+                // Apple documents addDomain with the replicated initializer as
+                // the migration path for an existing non-replicated record. On
+                // macOS isReplicated is not a reliable way to identify old
+                // records, so refresh every existing record through that path.
+                let replicatedDomain = NSFileProviderDomain(identifier: identifier, displayName: descriptor.displayName)
+                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                    NSFileProviderManager.add(replicatedDomain) { error in
+                        if let error {
+                            let nsError = error as NSError
+                            continuation.resume(throwing: FinderOpenError.provider(stage: "migrate_domain", domain: nsError.domain, code: nsError.code))
+                        } else {
+                            continuation.resume()
+                        }
+                    }
+                }
+                lifecycleLogger.info("finder.domain_migrated_to_replicated domain=\(descriptor.identifier, privacy: .public)")
+                return replicatedDomain
             }
             if attempt < 2 {
                 try await Task.sleep(nanoseconds: UInt64(250_000_000 * (attempt + 1)))
@@ -960,6 +994,12 @@ private final class NimbusSyncAppState: ObservableObject {
             switch failure {
             case let .provider(stage, domain, code):
                 lifecycleLogger.error("finder.open_failed stage=\(stage, privacy: .public) error_domain=\(domain, privacy: .public) error_code=\(code, privacy: .public)")
+                if isDomainDisabledError(domain: domain, code: code) {
+                    finderSettingsActionAvailable = true
+                }
+            case .userDisabled:
+                lifecycleLogger.error("finder.open_failed stage=domain_disabled")
+                finderSettingsActionAvailable = true
             case .managerUnavailable:
                 lifecycleLogger.error("finder.open_failed stage=resolve_manager")
             case .domainNotRegistered:
@@ -974,6 +1014,20 @@ private final class NimbusSyncAppState: ObservableObject {
         }
         lifecycleLogger.error("finder.open_failed stage=unknown error=\(String(describing: error), privacy: .public)")
         finderError = "Unable to open \(displayName) in Finder. Please try again after reopening NimbusSync."
+    }
+
+    func openFileProviderSettings() {
+        finderError = nil
+        finderSettingsActionAvailable = false
+        let candidates = [
+            "x-apple.systempreferences:com.apple.LoginItems-Settings.extension",
+            "x-apple.systempreferences:com.apple.ExtensionsPreferences",
+        ]
+        for value in candidates {
+            guard let url = URL(string: value) else { continue }
+            if NSWorkspace.shared.open(url) { return }
+        }
+        NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/System Settings.app"))
     }
 
     func openWeb(domain: DomainDescriptor) {
@@ -1124,7 +1178,9 @@ private struct SettingsView: View {
     let domains: [DomainDescriptor]
     let persistedNotificationPreferences: NotificationPreferences
     @Binding var finderError: String?
+    @Binding var finderSettingsActionAvailable: Bool
     let onOpenFinder: (DomainDescriptor) -> Void
+    let onOpenFileProviderSettings: () -> Void
     let onRemove: (DomainDescriptor) -> Void
     let onOpenWeb: (DomainDescriptor) -> Void
     let onReauthorize: (DomainDescriptor) -> Void
@@ -1135,11 +1191,13 @@ private struct SettingsView: View {
     @State private var notificationPreferences: NotificationPreferences
     @State private var pendingRemoval: DomainDescriptor?
 
-    init(domains: [DomainDescriptor], notificationPreferences: NotificationPreferences, finderError: Binding<String?>, onOpenFinder: @escaping (DomainDescriptor) -> Void, onRemove: @escaping (DomainDescriptor) -> Void, onOpenWeb: @escaping (DomainDescriptor) -> Void, onReauthorize: @escaping (DomainDescriptor) -> Void, onNotificationsChanged: @escaping (NotificationPreferences) -> Void, onAddDomain: @escaping () -> Void) {
+    init(domains: [DomainDescriptor], notificationPreferences: NotificationPreferences, finderError: Binding<String?>, finderSettingsActionAvailable: Binding<Bool>, onOpenFinder: @escaping (DomainDescriptor) -> Void, onOpenFileProviderSettings: @escaping () -> Void, onRemove: @escaping (DomainDescriptor) -> Void, onOpenWeb: @escaping (DomainDescriptor) -> Void, onReauthorize: @escaping (DomainDescriptor) -> Void, onNotificationsChanged: @escaping (NotificationPreferences) -> Void, onAddDomain: @escaping () -> Void) {
         self.domains = domains
         persistedNotificationPreferences = notificationPreferences
         _finderError = finderError
+        _finderSettingsActionAvailable = finderSettingsActionAvailable
         self.onOpenFinder = onOpenFinder
+        self.onOpenFileProviderSettings = onOpenFileProviderSettings
         self.onRemove = onRemove
         self.onOpenWeb = onOpenWeb
         self.onReauthorize = onReauthorize
@@ -1170,6 +1228,13 @@ private struct SettingsView: View {
             Text("Remote files will not be deleted. Dirty local data may be preserved by File Provider.")
         }
         .alert("Unable to open Finder", isPresented: Binding(get: { finderError != nil }, set: { if !$0 { finderError = nil } })) {
+            if finderSettingsActionAvailable {
+                Button("Open System Settings") {
+                    finderError = nil
+                    finderSettingsActionAvailable = false
+                    onOpenFileProviderSettings()
+                }
+            }
             Button("OK", role: .cancel) { finderError = nil }
         } message: {
             Text(finderError ?? "The File Provider location is unavailable.")

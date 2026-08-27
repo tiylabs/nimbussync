@@ -108,7 +108,7 @@ public actor DomainRegistryService {
         let verifiedScope = try RemoteScope(origin: scope.origin, accountID: identity.accountID, rootURI: identity.rootURI)
         let existing = try store.allDomains().compactMap { stored -> DomainDescriptor? in
             guard let oldScope = try? RemoteScope(origin: stored.origin, accountID: stored.accountID, rootURI: stored.rootURI) else { return nil }
-            return DomainDescriptor(displayName: stored.displayName, scope: oldScope, rootRemoteID: stored.rootRemoteID, accountID: stored.accountID, secretReference: stored.secretReference, capabilitySnapshot: stored.capabilitySnapshot, iconURL: stored.iconURL)
+            return DomainDescriptor(identifier: stored.identifier, displayName: stored.displayName, scope: oldScope, rootRemoteID: stored.rootRemoteID, accountID: stored.accountID, secretReference: stored.secretReference, capabilitySnapshot: stored.capabilitySnapshot, iconURL: stored.iconURL)
         }
         try scopeGuard.validate(newScope: verifiedScope, existing: existing)
         guard !existing.contains(where: { $0.displayName.caseInsensitiveCompare(normalizedDisplayName) == .orderedSame }) else {
@@ -182,7 +182,7 @@ public actor DomainRegistryService {
     public func descriptors() throws -> [DomainDescriptor] {
         try store.allDomains().compactMap { stored in
             guard let scope = try? RemoteScope(origin: stored.origin, accountID: stored.accountID, rootURI: stored.rootURI) else { return nil }
-            var descriptor = DomainDescriptor(displayName: stored.displayName, scope: scope, rootRemoteID: stored.rootRemoteID, accountID: stored.accountID, secretReference: stored.secretReference, capabilitySnapshot: stored.capabilitySnapshot, iconURL: stored.iconURL)
+            var descriptor = DomainDescriptor(identifier: stored.identifier, displayName: stored.displayName, scope: scope, rootRemoteID: stored.rootRemoteID, accountID: stored.accountID, secretReference: stored.secretReference, capabilitySnapshot: stored.capabilitySnapshot, iconURL: stored.iconURL)
             descriptor.status = stored.status
             return descriptor
         }

@@ -71,8 +71,13 @@ public enum CloudreveRemoteURI {
             return value.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         }
         let path = try normalizedPath(raw)
-        let encodedAccount = accountID.addingPercentEncoding(withAllowedCharacters: .urlUserAllowed) ?? accountID
-        return "cloudreve://\(encodedAccount)@my\(path == "/" ? "" : path)"
+        var components = URLComponents()
+        components.scheme = "cloudreve"
+        components.user = accountID
+        components.host = "my"
+        components.path = path == "/" ? "" : path
+        guard let value = components.string else { throw CloudreveIdentifierError.sensitiveValue }
+        return value.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
     }
 
     public static func path(_ value: String) -> String? {
@@ -305,8 +310,8 @@ public struct DomainDescriptor: Codable, Equatable, Sendable {
     public var capabilitySnapshot: CapabilitySnapshot
     public var secretReference: String
 
-    public init(displayName: String, scope: RemoteScope, rootRemoteID: String, accountID: String, secretReference: String, capabilitySnapshot: CapabilitySnapshot = CapabilitySnapshot(), iconURL: URL? = nil) {
-        self.identifier = CloudreveIdentifier.domain(); self.displayName = displayName; self.iconURL = iconURL; self.scope = scope; self.rootRemoteID = rootRemoteID; self.currentRootURI = scope.rootURI; self.accountID = accountID; self.status = .initializing; self.capabilitySnapshot = capabilitySnapshot; self.secretReference = secretReference
+    public init(identifier: String = CloudreveIdentifier.domain(), displayName: String, scope: RemoteScope, rootRemoteID: String, accountID: String, secretReference: String, capabilitySnapshot: CapabilitySnapshot = CapabilitySnapshot(), iconURL: URL? = nil) {
+        self.identifier = identifier; self.displayName = displayName; self.iconURL = iconURL; self.scope = scope; self.rootRemoteID = rootRemoteID; self.currentRootURI = scope.rootURI; self.accountID = accountID; self.status = .initializing; self.capabilitySnapshot = capabilitySnapshot; self.secretReference = secretReference
     }
 }
 

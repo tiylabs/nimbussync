@@ -132,8 +132,9 @@ public final class NimbusSyncRemoteBackend: FileProviderBackend, @unchecked Send
     private let secretVault: OpaqueSecretVault
     private let credentialRefresh: CredentialRefreshService
     private let logger = Logger(subsystem: "ai.tiy.nimbussync", category: "file-provider-download")
+    private let clientID: String?
 
-    public init(origin: URL, rootURI: String, store: SQLiteStateStore, vault: CredentialVault, credentialReference: String, capabilitySnapshot: CapabilitySnapshot = CapabilitySnapshot(), providerName: String = "unverified", secretVault: OpaqueSecretVault, requestTimeout: TimeInterval = 60) {
+    public init(origin: URL, rootURI: String, store: SQLiteStateStore, vault: CredentialVault, credentialReference: String, capabilitySnapshot: CapabilitySnapshot = CapabilitySnapshot(), providerName: String = "unverified", secretVault: OpaqueSecretVault, requestTimeout: TimeInterval = 60, clientID: String? = nil) {
         self.origin = origin
         self.rootURI = rootURI
         self.store = store
@@ -143,6 +144,7 @@ public final class NimbusSyncRemoteBackend: FileProviderBackend, @unchecked Send
         self.capabilitySnapshot = capabilitySnapshot
         self.providerName = providerName
         self.secretVault = secretVault
+        self.clientID = clientID ?? (try? store.ensureEventClientID())
         self.credentialRefresh = CredentialRefreshService(vault: vault)
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = requestTimeout
@@ -226,37 +228,36 @@ public final class NimbusSyncRemoteBackend: FileProviderBackend, @unchecked Send
     public func fetchContent(identifier: String, expectedVersion: Data?, to destination: URL) throws -> RemoteItem {
         var stage = "lookup_item"
         do {
-            guard let stored = try store.item(identifier: identifier), let remoteID = stored.remoteID else { throw CoreFailure(code: .notFound, retryable: false) }
+            guard let stored = try store.item(identifier: identifier), stored.remoteID != nil else { throw CoreFailure(code: .notFound, retryable: false) }
             guard stored.canRead else { throw CoreFailure(code: .permissionDenied, retryable: false, userActionRequired: true) }
             if let expectedVersion, expectedVersion != stored.version.content { throw CoreFailure(code: .versionConflict, retryable: false, userActionRequired: true) }
             stage = "refresh_remote_metadata"
-            let current = expectedVersion == nil ? try fetchRemoteItem(remoteID: remoteID, fallback: stored) : stored
+            let current = expectedVersion == nil ? try fetchRemoteItem(fallback: stored) : stored
             guard current.canRead else { throw CoreFailure(code: .permissionDenied, retryable: false, userActionRequired: true) }
             stage = "request_download_url"
-            var urlRequest: [String: Any] = ["uris": [current.uri]]
-            if let entity = current.remoteVersion, !entity.isEmpty {
-                // Cloudreve uses primary_entity to bind the signed URL to the
-                // metadata version resolved immediately above.
-                urlRequest["entity"] = entity
-            }
-            let fileURL: FileURLDTO = try request(path: "file/url", method: "POST", query: [], body: urlRequest, authenticated: true)
-            guard let signedURL = fileURL.urls.first?.url,
-                  let url = URL(string: signedURL),
-                  url.scheme?.lowercased() == "https",
-                  url.user == nil,
-                  url.password == nil else {
-                throw CoreFailure(code: .unsupportedServer, retryable: false, userActionRequired: true, redactedContext: ["stage": "invalid-download-url"])
-            }
+            let currentURI = try canonicalRemoteURI(current.uri)
+            let entity = current.remoteVersion?.isEmpty == false ? current.remoteVersion : nil
+            let url = try signedDownloadURL(uri: currentURI, entity: entity)
             stage = "download-url"
-            try downloadWithoutBearer(url: url, to: destination, expectedSize: current.size)
+            do {
+                try downloadWithoutBearer(url: url, to: destination, expectedSize: current.size)
+            } catch let error as DownloadHTTPError where error.statusCode == 404 && entity != nil {
+                logger.warning("download.url_retry_without_entity item=\(identifier, privacy: .public)")
+                let fallbackURL = try signedDownloadURL(uri: currentURI, entity: nil)
+                try downloadWithoutBearer(url: fallbackURL, to: destination, expectedSize: current.size)
+            }
             stage = "verify_remote_version"
-            let refreshed = try fetchRemoteItem(remoteID: remoteID, fallback: current)
+            let refreshed = try fetchRemoteItem(fallback: current)
             guard expectedVersion == nil || refreshed.version.content == current.version.content else {
                 try? FileManager.default.removeItem(at: destination)
                 throw CoreFailure(code: .versionConflict, retryable: false, userActionRequired: true)
             }
             logger.info("download.succeeded item=\(identifier, privacy: .public) bytes=\(current.size, privacy: .public)")
             return refreshed
+        } catch let error as DownloadHTTPError {
+            let failure = CoreFailure(code: .network, retryable: true, redactedContext: ["http-status": String(error.statusCode)])
+            logger.error("download.failed item=\(identifier, privacy: .public) stage=\(stage, privacy: .public) code=\(failure.code.rawValue, privacy: .public) retryable=\(failure.retryable, privacy: .public) correlation=\(failure.correlationID.uuidString, privacy: .public)")
+            throw failure
         } catch {
             if let failure = error as? CoreFailure {
                 logger.error("download.failed item=\(identifier, privacy: .public) stage=\(stage, privacy: .public) code=\(failure.code.rawValue, privacy: .public) retryable=\(failure.retryable, privacy: .public) correlation=\(failure.correlationID.uuidString, privacy: .public)")
@@ -354,8 +355,7 @@ public final class NimbusSyncRemoteBackend: FileProviderBackend, @unchecked Send
     private func parentURI(for identifier: String) throws -> String {
         if identifier == NSFileProviderItemIdentifier.rootContainer.rawValue { return rootURI }
         guard let item = try store.item(identifier: identifier) else { throw CoreFailure(code: .notFound, retryable: false) }
-        try validateURI(item.uri)
-        return item.uri
+        return try canonicalRemoteURI(item.uri)
     }
 
     private func validateName(_ name: String) throws {
@@ -364,6 +364,21 @@ public final class NimbusSyncRemoteBackend: FileProviderBackend, @unchecked Send
 
     private func validateURI(_ uri: String) throws {
         guard CloudreveRemoteURI.isWithin(uri, root: rootURI) else { throw CoreFailure(code: .rootUnavailable, retryable: false, userActionRequired: true) }
+    }
+
+    private func canonicalRemoteURI(_ value: String) throws -> String {
+        guard let rootComponents = URLComponents(string: rootURI), let accountID = rootComponents.user else {
+            throw CoreFailure(code: .rootUnavailable, retryable: false, userActionRequired: true)
+        }
+        do {
+            let canonical = try CloudreveRemoteURI.canonical(value, accountID: accountID)
+            try validateURI(canonical)
+            return canonical
+        } catch let error as CoreFailure {
+            throw error
+        } catch {
+            throw CoreFailure(code: .rootUnavailable, retryable: false, userActionRequired: true)
+        }
     }
 
     private func boundedUploadURLs(_ values: [String]) throws -> [String] {
@@ -539,47 +554,96 @@ public final class NimbusSyncRemoteBackend: FileProviderBackend, @unchecked Send
         return result
     }
 
-    private func fetchRemoteItem(remoteID: String, fallback: RemoteItem) throws -> RemoteItem {
-        let dto: RemoteFileDTO = try request(path: "file/info", method: "GET", query: [URLQueryItem(name: "id", value: remoteID), URLQueryItem(name: "extended", value: "true")], body: nil, authenticated: true)
+    private func fetchRemoteItem(fallback: RemoteItem) throws -> RemoteItem {
+        let uri = try canonicalRemoteURI(fallback.uri)
+        let dto: RemoteFileDTO = try request(path: "file/info", method: "GET", query: [URLQueryItem(name: "uri", value: uri), URLQueryItem(name: "extended", value: "true")], body: nil, authenticated: true)
         return try store.upsertRemoteItem(makeItem(dto, parentIdentifier: fallback.parentIdentifier ?? NSFileProviderItemIdentifier.rootContainer.rawValue, itemIdentifier: fallback.itemIdentifier))
     }
 
     private func makeItem(_ dto: RemoteFileDTO, parentIdentifier: String, itemIdentifier: String? = nil) throws -> RemoteItem {
-        try validateURI(dto.path)
+        let normalizedURI = try canonicalRemoteURI(dto.path)
         let contentRevision = dto.primaryEntity ?? dto.updatedAt ?? dto.createdAt ?? dto.id
         let isFolder = dto.type == 1
         let writable = capabilitySnapshot.canWrite(provider: providerName) && (dto.capability?.contains("w") ?? false)
         let trashable = writable && capabilitySnapshot.trashRestore == .verified
         let readable = dto.permission.map { $0.contains("r") } ?? true
         let remoteDeletable = dto.capability?.contains("d") ?? false
-        return RemoteItem(itemIdentifier: itemIdentifier ?? CloudreveIdentifier.item(), remoteID: dto.id, parentIdentifier: parentIdentifier, name: dto.name, uri: dto.path, kind: isFolder ? .folder : .file, contentType: isFolder ? UTType.folder.identifier : UTType.data.identifier, size: max(0, dto.size ?? 0), remoteVersion: dto.primaryEntity, version: ItemVersion(content: VersionHasher.content(primaryEntity: contentRevision), metadata: VersionHasher.metadata(parent: parentIdentifier, name: dto.name, kind: isFolder ? .folder : .file, permissionBits: readable ? 1 : 0, revision: dto.updatedAt)), creationDate: parseRemoteDate(dto.createdAt), contentModificationDate: parseRemoteDate(dto.updatedAt), canRead: readable, canWrite: writable && readable, canAddChildren: writable && readable && isFolder, canTrash: trashable && readable && remoteDeletable, canDelete: trashable && readable && remoteDeletable)
+        return RemoteItem(itemIdentifier: itemIdentifier ?? CloudreveIdentifier.item(), remoteID: dto.id, parentIdentifier: parentIdentifier, name: dto.name, uri: normalizedURI, kind: isFolder ? .folder : .file, contentType: isFolder ? UTType.folder.identifier : UTType.data.identifier, size: max(0, dto.size ?? 0), remoteVersion: dto.primaryEntity, version: ItemVersion(content: VersionHasher.content(primaryEntity: contentRevision), metadata: VersionHasher.metadata(parent: parentIdentifier, name: dto.name, kind: isFolder ? .folder : .file, permissionBits: readable ? 1 : 0, revision: dto.updatedAt)), creationDate: parseRemoteDate(dto.createdAt), contentModificationDate: parseRemoteDate(dto.updatedAt), canRead: readable, canWrite: writable && readable, canAddChildren: writable && readable && isFolder, canTrash: trashable && readable && remoteDeletable, canDelete: trashable && readable && remoteDeletable)
     }
 
     private func request<Value: Decodable>(path: String, method: String, query: [URLQueryItem], body: [String: Any]?, authenticated: Bool) throws -> Value {
+        let makeRequest: (Credential?) throws -> URLRequest = { credentialOverride in
+            try self.makeRequest(path: path, method: method, query: query, body: body, authenticated: authenticated, credentialOverride: credentialOverride)
+        }
+        var request = try makeRequest(nil)
+        var result = try perform(request)
+        guard let httpResponse = result.1 as? HTTPURLResponse else { throw CoreFailure(code: .network, retryable: true) }
+        guard (200..<300).contains(httpResponse.statusCode) else {
+            logger.error("api.failed path=\(path, privacy: .public) http_status=\(httpResponse.statusCode, privacy: .public)")
+            throw mapHTTPStatus(httpResponse.statusCode)
+        }
+
+        var envelope = try JSONDecoder().decode(APIEnvelope<Value>.self, from: result.0)
+        if authenticated, envelope.code != 0, isAuthenticationAPIError(code: envelope.code, message: envelope.msg) {
+            logger.info("api.auth_retry path=\(path, privacy: .public) api_code=\(envelope.code, privacy: .public)")
+            let refreshed = try refreshCredentialSynchronously()
+            request = try makeRequest(refreshed)
+            result = try performOnce(request)
+            guard let retryResponse = result.1 as? HTTPURLResponse else { throw CoreFailure(code: .network, retryable: true) }
+            guard (200..<300).contains(retryResponse.statusCode) else {
+                logger.error("api.failed path=\(path, privacy: .public) http_status=\(retryResponse.statusCode, privacy: .public) after_auth_retry=true")
+                throw mapHTTPStatus(retryResponse.statusCode)
+            }
+            envelope = try JSONDecoder().decode(APIEnvelope<Value>.self, from: result.0)
+        }
+
+        guard envelope.code == 0 else {
+            logger.error("api.failed path=\(path, privacy: .public) api_code=\(envelope.code, privacy: .public)")
+            throw mapAPIError(envelope.code, message: envelope.msg)
+        }
+        if let value = envelope.data { return value }
+        if Value.self == EmptyResponse.self, let empty = EmptyResponse() as? Value { return empty }
+        throw CoreFailure(code: .unknownOutcome, retryable: false)
+    }
+
+    private func makeRequest(path: String, method: String, query: [URLQueryItem], body: [String: Any]?, authenticated: Bool, credentialOverride: Credential?) throws -> URLRequest {
         var url = origin.appendingPathComponent("api/v4").appendingPathComponent(path)
         if !query.isEmpty { var components = URLComponents(url: url, resolvingAgainstBaseURL: false); components?.queryItems = query; url = components?.url ?? url }
         var request = URLRequest(url: url, timeoutInterval: requestTimeout)
         request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Accept")
+        if let clientID, !clientID.isEmpty {
+            request.setValue(clientID, forHTTPHeaderField: "X-Cr-Client-Id")
+        }
         if let body { request.httpBody = try JSONSerialization.data(withJSONObject: body); request.setValue("application/json", forHTTPHeaderField: "Content-Type") }
         if authenticated {
-            guard let credential = try vault.read(reference: credentialReference) else { throw CoreFailure(code: .authentication, retryable: false, userActionRequired: true) }
+            let credential: Credential?
+            if let credentialOverride {
+                credential = credentialOverride
+            } else {
+                credential = try vault.read(reference: credentialReference)
+            }
+            guard let credential else { throw CoreFailure(code: .authentication, retryable: false, userActionRequired: true) }
             request.setValue("Bearer \(credential.accessToken)", forHTTPHeaderField: "Authorization")
         }
-        let (data, response) = try perform(request)
-        guard let httpResponse = response as? HTTPURLResponse else { throw CoreFailure(code: .network, retryable: true) }
-        guard (200..<300).contains(httpResponse.statusCode) else {
-            logger.error("api.failed path=\(path, privacy: .public) http_status=\(httpResponse.statusCode, privacy: .public)")
-            throw mapHTTPStatus(httpResponse.statusCode)
+        return request
+    }
+
+    private func signedDownloadURL(uri: String, entity: String?) throws -> URL {
+        var body: [String: Any] = ["uris": [uri]]
+        if let entity, !entity.isEmpty {
+            body["entity"] = entity
         }
-        let envelope = try JSONDecoder().decode(APIEnvelope<Value>.self, from: data)
-        guard envelope.code == 0 else {
-            logger.error("api.failed path=\(path, privacy: .public) api_code=\(envelope.code, privacy: .public)")
-            throw mapAPIError(envelope.code)
+        let response: FileURLDTO = try request(path: "file/url", method: "POST", query: [], body: body, authenticated: true)
+        guard let rawURL = response.urls.first?.url,
+              let url = URL(string: rawURL),
+              url.scheme?.lowercased() == "https",
+              url.user == nil,
+              url.password == nil else {
+            throw CoreFailure(code: .unsupportedServer, retryable: false, userActionRequired: true, redactedContext: ["stage": "invalid-download-url"])
         }
-        if let value = envelope.data { return value }
-        if Value.self == EmptyResponse.self, let empty = EmptyResponse() as? Value { return empty }
-        throw CoreFailure(code: .unknownOutcome, retryable: false)
+        logger.info("download.url_received has_entity=\(entity != nil, privacy: .public) host=\(url.host ?? "unknown", privacy: .public)")
+        return url
     }
 
     private func perform(_ request: URLRequest) throws -> (Data, URLResponse) {
@@ -650,15 +714,26 @@ public final class NimbusSyncRemoteBackend: FileProviderBackend, @unchecked Send
             try? FileManager.default.removeItem(at: destination)
             let status = (result.response as? HTTPURLResponse)?.statusCode ?? 0
             logger.error("download.url_failed reason=http_status status=\(status, privacy: .public)")
-            throw CoreFailure(code: .network, retryable: true)
+            throw DownloadHTTPError(statusCode: status)
         }
         guard let temporaryURL = result.temporaryURL else {
             logger.error("download.url_failed reason=missing_temporary_file")
             throw CoreFailure(code: .network, retryable: true)
         }
         let input = try FileHandle(forReadingFrom: temporaryURL)
+        defer {
+            try? input.close()
+            try? FileManager.default.removeItem(at: temporaryURL)
+        }
+        if !FileManager.default.fileExists(atPath: destination.path) {
+            guard FileManager.default.createFile(atPath: destination.path, contents: nil) else {
+                logger.error("download.url_failed reason=destination_unavailable")
+                throw CoreFailure(code: .network, retryable: true)
+            }
+        }
         let output = try FileHandle(forWritingTo: destination)
-        defer { try? input.close(); try? output.close(); try? FileManager.default.removeItem(at: temporaryURL) }
+        try output.truncate(atOffset: 0)
+        defer { try? output.close() }
         var total: Int64 = 0
         while let chunk = try input.read(upToCount: 1024 * 1024), !chunk.isEmpty {
             try output.write(contentsOf: chunk)
@@ -684,6 +759,10 @@ private func stableOperationID(_ value: String) -> UUID {
     bytes[6] = (bytes[6] & 0x0f) | 0x50
     bytes[8] = (bytes[8] & 0x3f) | 0x80
     return UUID(uuid: (bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7], bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15]))
+}
+
+private struct DownloadHTTPError: Error {
+    let statusCode: Int
 }
 
 private final class URLSessionResult: @unchecked Sendable {
@@ -722,8 +801,31 @@ private func mapHTTPStatus(_ status: Int) -> CoreFailure {
     switch status { case 401: CoreFailure(code: .authentication, retryable: false, userActionRequired: true); case 403: CoreFailure(code: .permissionDenied, retryable: false); case 404: CoreFailure(code: .notFound, retryable: false); default: CoreFailure(code: .network, retryable: true) }
 }
 
-private func mapAPIError(_ code: Int) -> CoreFailure {
-    switch code { case 401, 40020, 40089: CoreFailure(code: .authentication, retryable: false, userActionRequired: true); case 40006, 40007, 40008: CoreFailure(code: .permissionDenied, retryable: false); case 40009, 40010: CoreFailure(code: .notFound, retryable: false); default: CoreFailure(code: .unknownOutcome, retryable: false) }
+private func isAuthenticationAPIError(code: Int, message: String?) -> Bool {
+    switch code {
+    case 401, 40020, 40089:
+        return true
+    case 40081:
+        return message?.range(of: "login required", options: [.caseInsensitive, .diacriticInsensitive]) != nil
+    default:
+        return false
+    }
+}
+
+private func mapAPIError(_ code: Int, message: String? = nil) -> CoreFailure {
+    if isAuthenticationAPIError(code: code, message: message) {
+        return CoreFailure(code: .authentication, retryable: false, userActionRequired: true)
+    }
+    switch code {
+    case 40006, 40007, 40008:
+        return CoreFailure(code: .permissionDenied, retryable: false)
+    case 40009, 40010:
+        return CoreFailure(code: .notFound, retryable: false)
+    case 40081:
+        return CoreFailure(code: .unknownOutcome, retryable: true)
+    default:
+        return CoreFailure(code: .unknownOutcome, retryable: false)
+    }
 }
 
 private struct UploadPartDescriptor {

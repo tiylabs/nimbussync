@@ -106,7 +106,7 @@ public actor ProductStore {
     public func snapshot() -> ProductSnapshot {
         let domains = (try? registry?.allDomains() ?? [])?.compactMap { stored -> DomainDescriptor? in
             guard let scope = try? RemoteScope(origin: stored.origin, accountID: stored.accountID, rootURI: stored.rootURI) else { return nil }
-            var descriptor = DomainDescriptor(displayName: stored.displayName, scope: scope, rootRemoteID: stored.rootRemoteID, accountID: stored.accountID, secretReference: stored.secretReference, capabilitySnapshot: stored.capabilitySnapshot, iconURL: stored.iconURL)
+            var descriptor = DomainDescriptor(identifier: stored.identifier, displayName: stored.displayName, scope: scope, rootRemoteID: stored.rootRemoteID, accountID: stored.accountID, secretReference: stored.secretReference, capabilitySnapshot: stored.capabilitySnapshot, iconURL: stored.iconURL)
             descriptor.status = stored.status
             return descriptor
         } ?? []

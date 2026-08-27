@@ -34,6 +34,26 @@ final class NimbusSyncTests: XCTestCase {
         XCTAssertThrowsError(try RemoteScope(origin: "https://example.com", accountID: "account", rootURI: "cloudreve://account@share/team"))
     }
 
+    func testCloudreveRemoteURICanonicalizesServerPathsWithinAccountRoot() throws {
+        let root = try RemoteScope(origin: "https://example.com", accountID: "W6UD", rootURI: "/sync-jorben/个人文件/Anna")
+        let rawPath = "/sync-jorben/个人文件/Anna/0091_001.pdf"
+        let canonical = try CloudreveRemoteURI.canonical(rawPath, accountID: "W6UD")
+        XCTAssertEqual(canonical, "cloudreve://W6UD@my/sync-jorben/%E4%B8%AA%E4%BA%BA%E6%96%87%E4%BB%B6/Anna/0091_001.pdf")
+        XCTAssertTrue(CloudreveRemoteURI.isWithin(canonical, root: root.rootURI))
+    }
+
+    func testProductSnapshotPreservesStoredDomainIdentifier() async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("cloudreve-domain-identity-\(UUID().uuidString).sqlite3")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let store = try SQLiteStateStore(url: url)
+        let identifier = "crd-11111111-1111-4111-8111-111111111111"
+        let scope = try RemoteScope(origin: "https://example.com", accountID: "account", rootURI: "/team")
+        let descriptor = DomainDescriptor(identifier: identifier, displayName: "Stable", scope: scope, rootRemoteID: "root", accountID: "account", secretReference: "credential-ref")
+        try store.registerDomain(descriptor)
+        let snapshot = await ProductStore(registry: store).snapshot()
+        XCTAssertEqual(snapshot.domains.first?.identifier, identifier)
+    }
+
     func testHealthReducerRequiresAnchorAndReconciliation() {
         var input = HealthInputs()
         input.authenticated = true; input.rootAvailable = true; input.scopeValid = true; input.appRunning = true; input.validAnchor = true
