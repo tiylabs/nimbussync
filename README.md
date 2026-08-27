@@ -221,9 +221,10 @@ Use the repository's normal access method if the GitHub remote is private.
 ## Build
 
 The single local build entry point is [`Scripts/build.sh`](Scripts/build.sh).
-It reads [`.nimbussyncrc`](.nimbussyncrc), runs the repository and Release
-configuration checks first, then builds the app and both extensions. It writes
-the app, zip archive, and checksum under `Dist/`.
+It optionally reads the machine-local `Config/build.local.sh` (copy
+[`Config/build.local.sh.example`](Config/build.local.sh.example) to create it),
+runs the repository and Release configuration checks first, then builds the app
+and both extensions. It writes the app, zip archive, and checksum under `Dist/`.
 
 ```sh
 Scripts/build.sh
@@ -264,7 +265,9 @@ user's keychain, install the three provisioning profiles, and provide:
 | `APP_GROUP_IDENTIFIER` | No | `group.ai.tiy.nimbussync` |
 | `BUILD_ROOT`/`DIST_DIR`/`VERSION` | No | Build directory, output directory, and artifact version |
 
-The build entry point does not import certificates or profiles.
+The build entry point does not import certificates or profiles. The local build
+configuration is ignored by Git so certificate names, profile UUIDs, and other
+machine-specific signing settings are not committed.
 
 Tests and formatting can be run directly when needed:
 

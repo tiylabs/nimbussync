@@ -190,9 +190,10 @@ cd nimbussync
 
 ## 构建
 
-唯一的本地构建入口是 [`Scripts/build.sh`](Scripts/build.sh)。它读取仓库根目录的
-[`.nimbussyncrc`](.nimbussyncrc)，先执行仓库和 Release 配置检查，再构建 App 与两个
-Extension，并把 App、zip 和 checksum 写入 `Dist/`。
+唯一的本地构建入口是 [`Scripts/build.sh`](Scripts/build.sh)。它可选读取机器本地的
+`Config/build.local.sh`（可复制 [`Config/build.local.sh.example`](Config/build.local.sh.example)
+创建），先执行仓库和 Release 配置检查，再构建 App 与两个 Extension，并把 App、zip
+和 checksum 写入 `Dist/`。
 
 ```sh
 Scripts/build.sh
@@ -218,8 +219,8 @@ VERSION=dev \
 Scripts/build.sh
 ```
 
-如果执行签名构建，必须先把证书私钥导入当前用户的 keychain，并把三个 provisioning
-profile 安装到 `$HOME/Library/MobileDevice/Provisioning Profiles/`，然后提供以下变量：
+如果执行签名构建，必须先把证书私钥导入当前用户的 keychain，并通过 Xcode 或系统方式
+安装三个 provisioning profile，然后提供以下变量：
 
 | 变量 | 必需 | 说明 |
 | --- | --- | --- |
@@ -233,7 +234,8 @@ profile 安装到 `$HOME/Library/MobileDevice/Provisioning Profiles/`，然后�
 | `APP_GROUP_IDENTIFIER` | 否 | 默认 `group.ai.tiy.nimbussync` |
 | `BUILD_ROOT`/`DIST_DIR`/`VERSION` | 否 | 构建目录、输出目录和 artifact 版本 |
 
-构建入口不会替你导入证书或 profile。
+构建入口不会替你导入证书或 profile。本地构建配置已加入 Git 忽略规则，因此证书名称、
+profile UUID 和其他机器专用签名设置不会被提交。
 
 也可以分别运行底层局部检查：
 

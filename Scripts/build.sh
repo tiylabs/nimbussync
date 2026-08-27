@@ -2,7 +2,7 @@
 set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-CONFIG_FILE=${NIMBUSSYNC_CONFIG:-"$ROOT/.nimbussyncrc"}
+CONFIG_FILE=${NIMBUSSYNC_CONFIG:-"$ROOT/Config/build.local.sh"}
 [ -f "$CONFIG_FILE" ] && . "$CONFIG_FILE"
 CONFIGURATION=${CONFIGURATION:-${NIMBUSSYNC_CONFIGURATION:-Debug}}
 BUILD_ROOT=${BUILD_ROOT:-${NIMBUSSYNC_APP_BUILD_ROOT:-"$ROOT/.build/ci"}}
@@ -52,7 +52,7 @@ artifact_scan() {
 secret_scan
 release_scan
 artifact_scan
-git -C "$ROOT" diff --check
+git --no-pager -C "$ROOT" diff --check
 
 mkdir -p "$BUILD_ROOT" "$DIST_DIR"
 

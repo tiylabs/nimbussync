@@ -1,0 +1,18 @@
+# NimbusSync machine-local build configuration template.
+# Copy to Config/build.local.sh. The copied file is ignored by Git.
+# Command-line environment variables take precedence over these values.
+
+# Unsigned Debug is the portable default.
+NIMBUSSYNC_CONFIGURATION="${NIMBUSSYNC_CONFIGURATION:-Debug}"
+NIMBUSSYNC_SIGNING_MODE="${NIMBUSSYNC_SIGNING_MODE:-unsigned}"
+NIMBUSSYNC_APP_GROUP_IDENTIFIER="${NIMBUSSYNC_APP_GROUP_IDENTIFIER:-group.ai.tiy.nimbussync}"
+
+# Optional local manual signing settings. Fill these only when signed builds
+# are required, using profiles and a certificate installed on this Mac.
+# NIMBUSSYNC_CONFIGURATION="${NIMBUSSYNC_CONFIGURATION:-Release}"
+# NIMBUSSYNC_SIGNING_MODE="${NIMBUSSYNC_SIGNING_MODE:-signed}"
+# NIMBUSSYNC_DEVELOPMENT_TEAM="YOUR_TEAM_ID"
+# NIMBUSSYNC_CODE_SIGN_IDENTITY="Developer ID Application: Your Name (YOUR_TEAM_ID)"
+# NIMBUSSYNC_APP_PROFILE="APP_PROFILE_UUID"
+# NIMBUSSYNC_FILE_PROVIDER_PROFILE="FILE_PROVIDER_PROFILE_UUID"
+# NIMBUSSYNC_FILE_PROVIDER_UI_PROFILE="FILE_PROVIDER_UI_PROFILE_UUID"

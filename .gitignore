@@ -79,6 +79,7 @@ Local.xcconfig
 Secrets.xcconfig
 /Config/Signing/
 /Config/Secrets/
+/Config/build.local.sh
 *.p12
 *.mobileprovision
 *.provisionprofile
