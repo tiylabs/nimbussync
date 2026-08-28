@@ -1,5 +1,6 @@
 import Foundation
 import FileProvider
+import OSLog
 import CloudreveDomainKit
 import CloudreveStoreBridge
 
@@ -306,26 +307,52 @@ public protocol WorkingSetSignaller: Sendable {
 }
 
 public final class FileProviderWorkingSetSignaller: WorkingSetSignaller, @unchecked Sendable {
-    private let manager: NSFileProviderManager
-    public init(manager: NSFileProviderManager) { self.manager = manager }
+    private let manager: NSFileProviderManager?
+    private let domain: NSFileProviderDomain?
+
+    public init(manager: NSFileProviderManager) {
+        self.manager = manager
+        self.domain = nil
+    }
+
+    public init(domain: NSFileProviderDomain) {
+        self.manager = nil
+        self.domain = domain
+    }
+
     public func signalWorkingSet() async throws {
-        try await manager.signalEnumerator(for: .workingSet)
+        let resolvedManager: NSFileProviderManager?
+        if let manager {
+            resolvedManager = manager
+        } else if let domain {
+            resolvedManager = NSFileProviderManager(for: domain)
+        } else {
+            resolvedManager = nil
+        }
+        guard let resolvedManager else { throw CoreFailure(code: .database, retryable: true) }
+        try await resolvedManager.signalEnumerator(for: .workingSet)
     }
 }
 
 public actor SignalOutboxDrainer {
     private let store: SQLiteStateStore
     private let signaller: WorkingSetSignaller
+    private let logger = Logger(subsystem: "ai.tiy.nimbussync", category: "signal-outbox")
 
     public init(store: SQLiteStateStore, signaller: WorkingSetSignaller) { self.store = store; self.signaller = signaller }
 
-    public func drain() async {
-        while let revision = try? store.latestPendingOutboxRevision() {
+    @discardableResult
+    public func drain() async -> Bool {
+        while true {
             do {
+                guard let revision = try store.latestPendingOutboxRevision() else { return true }
+                logger.info("signal.attempt revision=\(revision, privacy: .public)")
                 try await signaller.signalWorkingSet()
                 try store.acknowledgeOutbox(upTo: revision)
+                logger.info("signal.acknowledged revision=\(revision, privacy: .public)")
             } catch {
-                return
+                logger.error("signal.failed code=\(reconciliationErrorCode(error), privacy: .public)")
+                return false
             }
         }
     }
@@ -367,7 +394,9 @@ public actor EventJournalWriter {
             return nil
         }
         let journal = try store.commitProviderChange(item: change.item, oldParentIdentifier: change.oldParentIdentifier, newParentIdentifier: change.newParentIdentifier, kind: change.kind, origin: "remote_event")
-        await outboxDrainer?.drain()
+        if let outboxDrainer, !(await outboxDrainer.drain()) {
+            throw CoreFailure(code: .network, retryable: true)
+        }
         return journal
     }
 

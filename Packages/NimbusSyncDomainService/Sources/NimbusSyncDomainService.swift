@@ -4,13 +4,50 @@ import CloudreveDomainKit
 import CloudreveStoreBridge
 import CloudreveAuthKit
 
-public enum DomainProvisioningError: Error, Equatable {
+public enum DomainProvisioningError: Error, Equatable, LocalizedError, Sendable {
     case overlappingScope
     case accountMismatch
     case rootUnavailable
     case invalidDisplayName
+    case displayNameUnavailable
     case system(String)
     case rollbackRequired(String)
+
+    public var errorDescription: String? {
+        switch self {
+        case .overlappingScope:
+            "This Cloudreve location overlaps an existing NimbusSync location."
+        case .accountMismatch:
+            "The authorized Cloudreve account does not match the selected location."
+        case .rootUnavailable:
+            "The selected Cloudreve root is no longer available."
+        case .invalidDisplayName:
+            "Choose a non-empty domain name without control characters."
+        case .displayNameUnavailable:
+            "A Finder location with this name already exists. Choose a different name, or remove the old NimbusSync location in System Settings."
+        case .system:
+            "NimbusSync could not complete the File Provider operation."
+        case .rollbackRequired:
+            "NimbusSync could not add this Cloudreve location to Finder. Check that NimbusSync is enabled under System Settings > General > Login Items & Extensions > File Providers, then try again."
+        }
+    }
+
+    public var diagnosticDescription: String {
+        switch self {
+        case .overlappingScope:
+            "overlapping_scope"
+        case .accountMismatch:
+            "account_mismatch"
+        case .rootUnavailable:
+            "root_unavailable"
+        case .invalidDisplayName:
+            "invalid_display_name"
+        case .displayNameUnavailable:
+            "display_name_unavailable"
+        case let .system(detail), let .rollbackRequired(detail):
+            detail
+        }
+    }
 }
 
 public struct VerifiedDomainIdentity: Equatable, Sendable {
@@ -114,9 +151,17 @@ public actor DomainRegistryService {
         guard !existing.contains(where: { $0.displayName.caseInsensitiveCompare(normalizedDisplayName) == .orderedSame }) else {
             throw DomainProvisioningError.invalidDisplayName
         }
+        // Replicated File Provider roots are system-owned. A previous domain
+        // with the same visible name can make addDomain fail with file-exists
+        // even when the app registry has already been cleared.
+        let registeredDomains = try await lifecycle.registeredDomains()
+        if registeredDomains.contains(where: { $0.displayName.caseInsensitiveCompare(normalizedDisplayName) == .orderedSame }) {
+            throw DomainProvisioningError.displayNameUnavailable
+        }
         let descriptor = DomainDescriptor(displayName: normalizedDisplayName, scope: verifiedScope, rootRemoteID: identity.rootRemoteID, accountID: identity.accountID, secretReference: "credential-\(UUID().uuidString)", capabilitySnapshot: capabilitySnapshot, iconURL: iconURL)
         try store.beginProvisioning(domainID: descriptor.identifier, secretReference: descriptor.secretReference)
         var systemDomainAdded = false
+        var systemDomainRegistrationStarted = false
         do {
             try vault.write(credential, reference: descriptor.secretReference)
             try store.advanceProvisioning(domainID: descriptor.identifier, step: .credentialWritten)
@@ -125,6 +170,7 @@ public actor DomainRegistryService {
             try store.registerDomain(descriptor)
             try store.advanceProvisioning(domainID: descriptor.identifier, step: .domainDatabaseReady)
             let systemDomain = try lifecycle.makeSystemDomain(for: descriptor, trashEnabled: false)
+            systemDomainRegistrationStarted = true
             try await lifecycle.add(systemDomain)
             systemDomainAdded = true
             try store.advanceProvisioning(domainID: descriptor.identifier, step: .systemDomainAdded)
@@ -134,15 +180,27 @@ public actor DomainRegistryService {
             try store.finishProvisioning(domainID: descriptor.identifier)
             return descriptor
         } catch {
-            try? store.advanceProvisioning(domainID: descriptor.identifier, step: .rollbackRequired, error: String(describing: error))
-            if !systemDomainAdded {
+            var systemDomainPresent = systemDomainAdded
+            var systemDomainOutcomeUncertain = false
+            if systemDomainRegistrationStarted && !systemDomainPresent {
+                do {
+                    systemDomainPresent = try await lifecycle.systemDomainExists(descriptor.identifier)
+                } catch {
+                    // Keep the saga durable when the add callback and the
+                    // follow-up lookup both have an uncertain outcome.
+                    systemDomainOutcomeUncertain = true
+                }
+            }
+            let diagnostic = provisioningDiagnostic(for: error)
+            try? store.advanceProvisioning(domainID: descriptor.identifier, step: .rollbackRequired, error: diagnostic)
+            if !systemDomainPresent && !systemDomainOutcomeUncertain {
                 try? vault.remove(reference: descriptor.secretReference)
                 try? store.removeDomainRecord(identifier: descriptor.identifier)
                 try? storeFactory?.removeDomainStore(identifier: descriptor.identifier)
             } else {
                 try? store.setDomainStatus(identifier: descriptor.identifier, status: .repairRequired)
             }
-            throw DomainProvisioningError.rollbackRequired(String(describing: error))
+            throw DomainProvisioningError.rollbackRequired(diagnostic)
         }
     }
 
@@ -187,6 +245,20 @@ public actor DomainRegistryService {
             return descriptor
         }
     }
+
+    private func provisioningDiagnostic(for error: Error) -> String {
+        if let lifecycleError = error as? DomainLifecycleError {
+            return lifecycleError.diagnosticDescription
+        }
+        if let provisioningError = error as? DomainProvisioningError {
+            return provisioningError.diagnosticDescription
+        }
+        if let coreFailure = error as? CoreFailure {
+            return "core_failure:\(coreFailure.code.rawValue)"
+        }
+        let nsError = error as NSError
+        return "error:\(nsError.domain):\(nsError.code)"
+    }
 }
 
 public actor SafeDomainRemovalService {
@@ -200,15 +272,13 @@ public actor SafeDomainRemovalService {
     public func remove(descriptor: DomainDescriptor) async throws -> URL? {
         let domain = try lifecycle.makeSystemDomain(for: descriptor, trashEnabled: false)
         let domainStore = try storeFactory?.domainStore(identifier: descriptor.identifier) ?? store
-        try domainStore.setDomainStatus(identifier: descriptor.identifier, status: .removalPreflight)
-        guard let manager = NSFileProviderManager(for: domain) else {
-            throw DomainProvisioningError.system("File Provider manager is unavailable")
+        guard try await lifecycle.systemDomainExists(descriptor.identifier) else {
+            throw DomainProvisioningError.system("File Provider domain is not registered")
         }
-        let waitSucceeded = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Bool, Error>) in
-            manager.waitForChanges(below: .rootContainer) { error in
-                if let error { continuation.resume(throwing: error) } else { continuation.resume(returning: true) }
-            }
-        }
+        try setRemovalStatus(.removalPreflight, domainStore: domainStore, identifier: descriptor.identifier)
+        // A failed or timed-out wait means the local state is uncertain. The
+        // removal policy handles that case by preserving dirty user data.
+        let waitSucceeded = (try? await lifecycle.waitForChanges(below: domain)) ?? false
         let pending = try domainStore.pendingSetState()
         let decision = DomainRemovalPolicy().decision(hasDirtyOperations: try domainStore.hasDirtyWork(), pendingSetReliable: !pending.capped, waitForChangesSucceeded: waitSucceeded)
         guard decision == .safe || decision == .preserveDirtyData else { throw DomainProvisioningError.rollbackRequired("domain removal preflight blocked") }
@@ -228,5 +298,12 @@ public actor SafeDomainRemovalService {
             try storeFactory?.removeDomainStore(identifier: descriptor.identifier)
         }
         return preserved
+    }
+
+    private func setRemovalStatus(_ status: DomainStatus, domainStore: SQLiteStateStore, identifier: String) throws {
+        try domainStore.setDomainStatus(identifier: identifier, status: status)
+        if store !== domainStore {
+            try store.setDomainStatus(identifier: identifier, status: status)
+        }
     }
 }

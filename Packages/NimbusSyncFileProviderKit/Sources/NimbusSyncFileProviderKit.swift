@@ -3,6 +3,7 @@ import FileProvider
 import UniformTypeIdentifiers
 import ImageIO
 import AppKit
+import OSLog
 import CloudreveDomainKit
 import CloudreveStoreBridge
 import CloudreveAuthKit
@@ -286,8 +287,9 @@ open class NimbusSyncFileProviderExtension: NSObject, NSFileProviderDomainState,
     private let stateProjection: DomainStateProjection
     private let stateLock = NSLock()
     private var invalidated = false
+    private let reconciliationLogger = Logger(subsystem: "ai.tiy.nimbussync", category: "file-provider-reconciliation")
 
-    public required init(domain: NSFileProviderDomain) {
+    @objc public required init(domain: NSFileProviderDomain) {
         self.domain = domain
         var resolvedStore: SQLiteStateStore?
         var resolvedBackend: FileProviderBackend = UnavailableFileProviderBackend()
@@ -319,11 +321,12 @@ open class NimbusSyncFileProviderExtension: NSObject, NSFileProviderDomainState,
         self.backend = backend
     }
 
-    public func invalidate() { invalidated = true }
+    @objc public func invalidate() { invalidated = true }
 
-    public var domainVersion: NSFileProviderDomainVersion { stateLock.lock(); defer { stateLock.unlock() }; return stateProjection.domainVersion }
-    public var userInfo: [AnyHashable: Any] { stateLock.lock(); defer { stateLock.unlock() }; return stateProjection.userInfo }
+    @objc public var domainVersion: NSFileProviderDomainVersion { stateLock.lock(); defer { stateLock.unlock() }; return stateProjection.domainVersion }
+    @objc public var userInfo: [AnyHashable: Any] { stateLock.lock(); defer { stateLock.unlock() }; return stateProjection.userInfo }
 
+    @objc(itemForIdentifier:request:completionHandler:)
     public func item(for identifier: NSFileProviderItemIdentifier, request: NSFileProviderRequest, completionHandler: @escaping (NSFileProviderItem?, Error?) -> Void) -> Progress {
         let progress = Progress(totalUnitCount: 1)
         let completion = ItemCompletion(completionHandler)
@@ -353,6 +356,7 @@ open class NimbusSyncFileProviderExtension: NSObject, NSFileProviderDomainState,
         return progress
     }
 
+    @objc(fetchContentsForItemWithIdentifier:version:request:completionHandler:)
     public func fetchContents(for itemIdentifier: NSFileProviderItemIdentifier, version requestedVersion: NSFileProviderItemVersion?, request: NSFileProviderRequest, completionHandler: @escaping (URL?, NSFileProviderItem?, Error?) -> Void) -> Progress {
         let progress = Progress(totalUnitCount: 1)
         let cancellation = FetchCompletion(completionHandler)
@@ -380,6 +384,7 @@ open class NimbusSyncFileProviderExtension: NSObject, NSFileProviderDomainState,
         return progress
     }
 
+    @objc(createItemBasedOnTemplate:fields:contents:options:request:completionHandler:)
     public func createItem(basedOn itemTemplate: NSFileProviderItem, fields: NSFileProviderItemFields, contents url: URL?, options: NSFileProviderCreateItemOptions, request: NSFileProviderRequest, completionHandler: @escaping (NSFileProviderItem?, NSFileProviderItemFields, Bool, Error?) -> Void) -> Progress {
         let progress = Progress(totalUnitCount: 1)
         let templateIdentifier = itemTemplate.itemIdentifier.rawValue
@@ -404,6 +409,7 @@ open class NimbusSyncFileProviderExtension: NSObject, NSFileProviderDomainState,
         return progress
     }
 
+    @objc(modifyItem:baseVersion:changedFields:contents:options:request:completionHandler:)
     public func modifyItem(_ item: NSFileProviderItem, baseVersion version: NSFileProviderItemVersion, changedFields: NSFileProviderItemFields, contents newContents: URL?, options: NSFileProviderModifyItemOptions, request: NSFileProviderRequest, completionHandler: @escaping (NSFileProviderItem?, NSFileProviderItemFields, Bool, Error?) -> Void) -> Progress {
         let progress = Progress(totalUnitCount: 1)
         let itemIdentifier = item.itemIdentifier.rawValue
@@ -432,6 +438,7 @@ open class NimbusSyncFileProviderExtension: NSObject, NSFileProviderDomainState,
         return progress
     }
 
+    @objc(deleteItemWithIdentifier:baseVersion:options:request:completionHandler:)
     public func deleteItem(identifier: NSFileProviderItemIdentifier, baseVersion version: NSFileProviderItemVersion, options: NSFileProviderDeleteItemOptions, request: NSFileProviderRequest, completionHandler: @escaping (Error?) -> Void) -> Progress {
         let progress = Progress(totalUnitCount: 1)
         let completion = DeleteCompletion(completionHandler)
@@ -449,15 +456,20 @@ open class NimbusSyncFileProviderExtension: NSObject, NSFileProviderDomainState,
         return progress
     }
 
+    @objc(enumeratorForContainerItemIdentifier:request:error:)
     public func enumerator(for containerItemIdentifier: NSFileProviderItemIdentifier, request: NSFileProviderRequest) throws -> NSFileProviderEnumerator {
         let parent = containerItemIdentifier == .rootContainer ? NSFileProviderItemIdentifier.rootContainer.rawValue : containerItemIdentifier.rawValue
         return NimbusSyncFileProviderEnumerator(parentIdentifier: parent, domainIdentifier: domain.identifier.rawValue, store: store, backend: backend)
     }
 
+    @objc(importDidFinishWithCompletionHandler:)
     public func importDidFinish(completionHandler: @escaping () -> Void) { try? store?.completeSystemSetRefresh("materialized"); completionHandler() }
+    @objc(materializedItemsDidChangeWithCompletionHandler:)
     public func materializedItemsDidChange(completionHandler: @escaping () -> Void) { try? store?.markSystemSetRefreshRequired("materialized"); completionHandler() }
+    @objc(pendingItemsDidChangeWithCompletionHandler:)
     public func pendingItemsDidChange(completionHandler: @escaping () -> Void) { try? store?.markSystemSetRefreshRequired("pending"); completionHandler() }
 
+    @objc(fetchThumbnailsForItemIdentifiers:requestedSize:perThumbnailCompletionHandler:completionHandler:)
     public func fetchThumbnails(for itemIdentifiers: [NSFileProviderItemIdentifier], requestedSize size: CGSize, perThumbnailCompletionHandler: @escaping (NSFileProviderItemIdentifier, Data?, Error?) -> Void, completionHandler: @escaping (Error?) -> Void) -> Progress {
         let progress = Progress(totalUnitCount: Int64(itemIdentifiers.count))
         let completion = ErrorCompletion(completionHandler)
@@ -480,27 +492,59 @@ open class NimbusSyncFileProviderExtension: NSObject, NSFileProviderDomainState,
         return progress
     }
 
+    @objc(performActionWithIdentifier:onItemsWithIdentifiers:completionHandler:)
     public func performAction(identifier actionIdentifier: NSFileProviderExtensionActionIdentifier, onItemsWithIdentifiers itemIdentifiers: [NSFileProviderItemIdentifier], completionHandler: @escaping (Error?) -> Void) -> Progress {
         let progress = Progress(totalUnitCount: 1)
         let completion = ErrorCompletion(completionHandler)
         guard actionIdentifier.rawValue == "ai.tiy.nimbussync.check-for-updates" else { completion.call(FileProviderErrorMapper.map(CoreFailure(code: .unsupportedMetadata, retryable: false))); return progress }
-        progress.cancellationHandler = { completion.call(FileProviderErrorMapper.map(CoreFailure(code: .cancelled, retryable: false))) }
-        Task { [weak self] in
+        let task = Task { [weak self] in
             guard let self, !progress.isCancelled else { completion.call(FileProviderErrorMapper.map(CoreFailure(code: .cancelled, retryable: false))); return }
+            let registry = try? AppGroupStoreFactory().registryStore()
             do {
                 guard let store = self.store else { throw CoreFailure(code: .database, retryable: false) }
                 let scope = itemIdentifiers.first?.rawValue ?? NSFileProviderItemIdentifier.rootContainer.rawValue
                 guard scope == NSFileProviderItemIdentifier.rootContainer.rawValue || scope == NSFileProviderItemIdentifier.workingSet.rawValue || CloudreveIdentifier.validate(scope, prefix: CloudreveIdentifier.itemPrefix) else { throw CoreFailure(code: .unsupportedMetadata, retryable: false) }
-                try store.startReconcile(runID: UUID(), scope: scope, generation: 1, phase: "prepared", cursor: nil)
-                try store.updateSyncState(reconcileStatus: "reconciling")
-                try store.markSystemSetRefreshRequired("working_set")
-                guard let manager = NSFileProviderManager(for: self.domain) else { throw CoreFailure(code: .database, retryable: false) }
-                try await manager.signalEnumerator(for: .workingSet)
+                guard let stored = try store.domain(identifier: self.domain.identifier.rawValue),
+                      let remoteScope = try? RemoteScope(origin: stored.origin, accountID: stored.accountID, rootURI: stored.rootURI),
+                      let origin = URL(string: stored.origin) else {
+                    throw CoreFailure(code: .database, retryable: false)
+                }
+                var descriptor = DomainDescriptor(identifier: stored.identifier, displayName: stored.displayName, scope: remoteScope, rootRemoteID: stored.rootRemoteID, accountID: stored.accountID, secretReference: stored.secretReference, capabilitySnapshot: stored.capabilitySnapshot, iconURL: stored.iconURL)
+                descriptor.status = .reconciling
+                try store.setDomainStatus(identifier: stored.identifier, status: .reconciling)
+                try? registry?.setDomainStatus(identifier: stored.identifier, status: .reconciling)
+                reconciliationLogger.info("manual_reconcile.started domain=\(stored.identifier, privacy: .public) scope=\(scope, privacy: .public)")
+
+                let vault = KeychainCredentialVault(accessGroup: KeychainAccessGroup.current())
+                let reconciler = CloudreveReconciliationService(origin: origin, store: store, registry: registry, vault: vault, credentialReference: stored.secretReference)
+                try await reconciler.reconcile(descriptor: descriptor, reason: "manual_check")
+
+                let signaller = FileProviderWorkingSetSignaller(domain: self.domain)
+                let drainer = SignalOutboxDrainer(store: store, signaller: signaller)
+                guard await drainer.drain() else { throw CoreFailure(code: .network, retryable: true) }
+                // A manual check must also wake Finder when the item was
+                // already journaled but the previous system signal was missed.
+                try await signaller.signalWorkingSet()
+                try store.setDomainStatus(identifier: stored.identifier, status: .healthy)
+                try? registry?.setDomainStatus(identifier: stored.identifier, status: .healthy)
+                reconciliationLogger.info("manual_reconcile.completed domain=\(stored.identifier, privacy: .public)")
                 progress.completedUnitCount = 1
                 completion.call(nil)
             } catch {
+                if let store = self.store, let stored = try? store.domain(identifier: self.domain.identifier.rawValue) {
+                    let status = fileProviderReconciliationStatus(for: error)
+                    try? store.setDomainStatus(identifier: stored.identifier, status: status)
+                    try? registry?.setDomainStatus(identifier: stored.identifier, status: status)
+                    reconciliationLogger.error("manual_reconcile.failed domain=\(stored.identifier, privacy: .public) code=\(fileProviderErrorCode(error), privacy: .public)")
+                } else {
+                    reconciliationLogger.error("manual_reconcile.failed code=\(fileProviderErrorCode(error), privacy: .public)")
+                }
                 completion.call(FileProviderErrorMapper.map(error))
             }
+        }
+        progress.cancellationHandler = {
+            task.cancel()
+            completion.call(FileProviderErrorMapper.map(CoreFailure(code: .cancelled, retryable: false)))
         }
         return progress
     }
@@ -606,6 +650,24 @@ private func makeThumbnail(data: Data, size: CGSize) -> Data? {
     CGImageDestinationAddImage(destination, image, nil)
     guard CGImageDestinationFinalize(destination) else { return nil }
     return destinationData as Data
+}
+
+private func fileProviderErrorCode(_ error: Error) -> String {
+    if let failure = error as? CoreFailure { return failure.code.rawValue }
+    if error is CancellationError { return "cancelled" }
+    let nsError = error as NSError
+    return "error_\(nsError.domain)_\(nsError.code)"
+}
+
+private func fileProviderReconciliationStatus(for error: Error) -> DomainStatus {
+    guard let failure = error as? CoreFailure else { return .eventDegraded }
+    switch failure.code {
+    case .authentication: return .authExpired
+    case .rootUnavailable: return .rootUnavailable
+    case .scopeConflict: return .scopeConflict
+    case .database: return .repairRequired
+    default: return .eventDegraded
+    }
 }
 
 public enum FileProviderErrorMapper {

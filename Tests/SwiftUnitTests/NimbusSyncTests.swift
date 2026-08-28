@@ -129,6 +129,46 @@ final class NimbusSyncTests: XCTestCase {
         _ = anchor
     }
 
+    func testWorkingSetJournalDeliversRemoteCreateAfterExistingAnchor() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("cloudreve-working-set-\(UUID().uuidString).sqlite3")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let store = try SQLiteStateStore(url: url)
+        let domainID = CloudreveIdentifier.domain()
+        let remoteScope = try RemoteScope(origin: "https://example.com", accountID: "account", rootURI: "/")
+        try store.registerDomain(DomainDescriptor(identifier: domainID, displayName: "Test", scope: remoteScope, rootRemoteID: "root", accountID: "account", secretReference: "credential-ref"))
+        let scope = NSFileProviderItemIdentifier.workingSet.rawValue
+        let before = try store.currentAnchor(domainIdentifier: domainID, scope: scope)
+        let item = RemoteItem(itemIdentifier: CloudreveIdentifier.item(), remoteID: "remote-working-set", parentIdentifier: NSFileProviderItemIdentifier.rootContainer.rawValue, name: "new-file.dmg", uri: "/new-file.dmg", kind: .file, contentType: "public.data", version: ItemVersion(content: Data("v1".utf8), metadata: Data("m1".utf8)), canRead: true)
+
+        _ = try store.commitProviderChange(item: item, oldParentIdentifier: nil, newParentIdentifier: item.parentIdentifier, kind: "reconciled", origin: "reconciliation")
+
+        XCTAssertEqual(before.epoch, try store.currentAnchor(domainIdentifier: domainID, scope: scope).epoch)
+        let batch = try store.enumerateChanges(domainIdentifier: domainID, scope: scope, from: before)
+        XCTAssertEqual(batch.changes.map(\.itemIdentifier), [item.itemIdentifier])
+        XCTAssertEqual(batch.changes.first?.newParentIdentifier, item.parentIdentifier)
+        XCTAssertEqual(batch.changes.first?.kind, "reconciled")
+    }
+
+    func testSignalOutboxRetainsRevisionUntilWorkingSetSignalSucceeds() async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("cloudreve-signal-outbox-\(UUID().uuidString).sqlite3")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let store = try SQLiteStateStore(url: url)
+        let item = RemoteItem(itemIdentifier: CloudreveIdentifier.item(), remoteID: "remote-signal", parentIdentifier: NSFileProviderItemIdentifier.rootContainer.rawValue, name: "signal.txt", uri: "/signal.txt", kind: .file, contentType: "public.data", version: ItemVersion(content: Data("v1".utf8), metadata: Data("m1".utf8)), canRead: true)
+        _ = try store.commitProviderChange(item: item, oldParentIdentifier: nil, newParentIdentifier: item.parentIdentifier, kind: "reconciled", origin: "reconciliation")
+
+        let failing = RecordingWorkingSetSignaller(shouldFail: true)
+        let failed = await SignalOutboxDrainer(store: store, signaller: failing).drain()
+        XCTAssertFalse(failed)
+        XCTAssertEqual(try store.pendingOutboxCount(), 1)
+
+        let succeeding = RecordingWorkingSetSignaller(shouldFail: false)
+        let drained = await SignalOutboxDrainer(store: store, signaller: succeeding).drain()
+        XCTAssertTrue(drained)
+        XCTAssertEqual(try store.pendingOutboxCount(), 0)
+        let signalCalls = await succeeding.callCount()
+        XCTAssertEqual(signalCalls, 1)
+    }
+
     func testSSEParserHandlesCRLFCommentsAndMultilineData() throws {
         let parser = SSEParser(maxFrameBytes: 1024)
         let events = try parser.append(Data(": keep\r\nevent: file\r\nid: 3\r\ndata: one\r\ndata: two\r\n\r\n".utf8))
@@ -311,6 +351,30 @@ final class NimbusSyncTests: XCTestCase {
         XCTAssertEqual(guarder.rejectedCount, 2)
     }
 
+    func testEventScopeGuardAcceptsCloudreveCreateWithEmptyDestination() {
+        var guarder = EventScopeGuard(rootRemoteID: "root", rootURI: "/team")
+        XCTAssertTrue(guarder.accepts(remoteID: "child", fromURI: "/team/new-file.dmg", toURI: ""))
+        XCTAssertEqual(guarder.rejectedCount, 0)
+    }
+
+    func testCloudreveCreateWithEmptyDestinationCommitsItemAndSignalOutbox() async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("cloudreve-remote-create-\(UUID().uuidString).sqlite3")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let store = try SQLiteStateStore(url: url)
+        let parent = NSFileProviderItemIdentifier.rootContainer.rawValue
+        let item = RemoteItem(itemIdentifier: CloudreveIdentifier.item(), remoteID: "remote-new", parentIdentifier: parent, name: "new-file.dmg", uri: "/team/new-file.dmg", kind: .file, contentType: "public.data", version: ItemVersion(content: Data("v1".utf8), metadata: Data("m1".utf8)), canRead: true)
+        let change = EnrichedRemoteChange(item: item, oldParentIdentifier: nil, newParentIdentifier: parent, kind: "created")
+        let pipeline = EventNormalizationPipeline(scopeGuard: EventScopeGuard(rootRemoteID: "root", rootURI: "/team"), enricher: FixedRemoteEventEnricher(change: change), writer: EventJournalWriter(store: store))
+
+        let result = await pipeline.consume(RemoteEventHint(kind: .file, remoteID: "remote-new", fromURI: "/team/new-file.dmg", toURI: ""))
+
+        XCTAssertEqual(result, .unknown)
+        XCTAssertEqual(try store.item(identifier: item.itemIdentifier), item)
+        XCTAssertEqual(try store.pendingOutboxCount(), 1)
+        let pendingScopes = await pipeline.scopesNeedingReconciliation()
+        XCTAssertTrue(pendingScopes.isEmpty)
+    }
+
     func testEchoMatcherRequiresParentNameTrashAndVersionEvidence() {
         let item = RemoteItem(itemIdentifier: "cri-item", remoteID: "remote", parentIdentifier: "cri-parent", name: "file.txt", uri: "/file.txt", kind: .file, contentType: "public.data", version: ItemVersion(content: Data("v1".utf8), metadata: Data("m1".utf8)), canRead: true, trashed: false)
         let evidence = EchoEvidence(remoteID: "remote", operationID: UUID(), expectedParentIdentifier: "cri-parent", expectedName: "file.txt", expectedTrashed: false, expectedVersion: Data("v1".utf8))
@@ -404,6 +468,28 @@ final class NimbusSyncTests: XCTestCase {
         XCTAssertEqual(DomainProvisioningReducer.recover(record: registered, systemDomainExists: false), .rollbackRequired)
         XCTAssertEqual(DomainRemovalPolicy().decision(hasDirtyOperations: false, pendingSetReliable: false, waitForChangesSucceeded: true), .preserveDirtyData)
         XCTAssertEqual(DomainRemovalPolicy().decision(hasDirtyOperations: true, pendingSetReliable: true, waitForChangesSucceeded: true), .preserveDirtyData)
+    }
+
+    func testProvisioningErrorsAreLocalizedAndFileProviderDiagnosticsAreRetained() {
+        let providerDescription = ErrorDescription("provider unavailable", domain: "NSFileProviderErrorDomain", code: -2001)
+        XCTAssertEqual(providerDescription.diagnosticDescription, "file_provider_error:NSFileProviderErrorDomain:-2001")
+        XCTAssertTrue(providerDescription.userMessage.contains("File Provider extension is unavailable"))
+
+        let lifecycleError = DomainLifecycleError.system(providerDescription)
+        XCTAssertEqual(lifecycleError.diagnosticDescription, providerDescription.diagnosticDescription)
+        XCTAssertEqual(lifecycleError.errorDescription, providerDescription.userMessage)
+
+        let provisioningError = DomainProvisioningError.rollbackRequired(providerDescription.diagnosticDescription)
+        XCTAssertTrue((provisioningError as LocalizedError).errorDescription?.contains("could not add") == true)
+        XCTAssertFalse((provisioningError as LocalizedError).errorDescription?.contains("rollbackRequired") == true)
+        XCTAssertEqual(provisioningError.diagnosticDescription, providerDescription.diagnosticDescription)
+
+        let nameConflict = DomainProvisioningError.displayNameUnavailable
+        XCTAssertTrue((nameConflict as LocalizedError).errorDescription?.contains("different name") == true)
+        XCTAssertEqual(nameConflict.diagnosticDescription, "display_name_unavailable")
+
+        let fileExists = ErrorDescription("file exists", domain: "NSCocoaErrorDomain", code: 516)
+        XCTAssertTrue(fileExists.userMessage.contains("still registered"))
     }
 
     func testSecretRedactionDoesNotPersistCredentialMaterial() {
@@ -557,6 +643,36 @@ final class NimbusSyncTests: XCTestCase {
 private actor RefreshInvocationCounter {
     private(set) var value = 0
     func increment() { value += 1 }
+}
+
+private final class FixedRemoteEventEnricher: RemoteEventEnricher, @unchecked Sendable {
+    private let change: EnrichedRemoteChange
+
+    init(change: EnrichedRemoteChange) {
+        self.change = change
+    }
+
+    func enrich(_ hint: RemoteEventHint) async throws -> EnrichedRemoteChange? {
+        change
+    }
+}
+
+private actor RecordingWorkingSetSignaller: WorkingSetSignaller {
+    private let shouldFail: Bool
+    private var calls = 0
+
+    init(shouldFail: Bool) {
+        self.shouldFail = shouldFail
+    }
+
+    func signalWorkingSet() async throws {
+        calls += 1
+        if shouldFail { throw CoreFailure(code: .network, retryable: true) }
+    }
+
+    func callCount() -> Int {
+        calls
+    }
 }
 
 private final class LockedURLCapture: @unchecked Sendable {

@@ -1,6 +1,7 @@
 import Foundation
 import FileProvider
 import ServiceManagement
+import OSLog
 import CloudreveDomainKit
 import CloudreveStoreBridge
 import CloudreveAuthKit
@@ -22,7 +23,9 @@ public struct EventScopeGuard: Sendable {
         guard let remoteID, !remoteID.isEmpty, remoteID != rootRemoteID, !remoteID.contains(where: { $0.isWhitespace || $0 == "\0" }) else { rejectedCount += 1; return false }
         let normalizedRoot = canonicalURI(rootURI)
         guard normalizedRoot != nil else { rejectedCount += 1; return false }
-        for uri in [fromURI, toURI].compactMap({ $0 }) {
+        // Cloudreve sends an empty `to` for create/modify/delete events; only
+        // a supplied path is evidence that the event crosses this scope.
+        for uri in [fromURI, toURI].compactMap({ $0 }).filter({ !$0.isEmpty }) {
             guard let normalized = canonicalURI(uri), let normalizedRoot else { rejectedCount += 1; return false }
             if normalizedRoot != "/" && normalized != normalizedRoot && !normalized.hasPrefix(normalizedRoot + "/") {
                 rejectedCount += 1
@@ -119,6 +122,7 @@ public final class CloudreveEventEnricher: RemoteEventEnricher, @unchecked Senda
     private let credentialReference: String
     private let session: URLSession
     private let credentialRefresh: CredentialRefreshService
+    private let logger = Logger(subsystem: "ai.tiy.nimbussync", category: "remote-events")
 
     public init(origin: URL, rootURI: String, rootRemoteID: String = "", store: SQLiteStateStore, vault: CredentialVault, credentialReference: String, session: URLSession? = nil) {
         self.origin = origin; self.rootRemoteID = rootRemoteID; self.rootURI = rootURI; self.store = store; self.vault = vault; self.credentialReference = credentialReference
@@ -154,12 +158,14 @@ public final class CloudreveEventEnricher: RemoteEventEnricher, @unchecked Senda
         var components = URLComponents(url: origin.appendingPathComponent("api/v4/file/info"), resolvingAgainstBaseURL: false)
         components?.queryItems = [URLQueryItem(name: "id", value: id), URLQueryItem(name: "extended", value: "true")]
         guard let url = components?.url else { throw CoreFailure(code: .network, retryable: true) }
+        logger.info("event_enrichment.request.begin endpoint=file/info")
         let credential = try await credentialRefresh.credential(origin: origin, reference: credentialReference)
         var request = URLRequest(url: url, timeoutInterval: 15)
         request.setValue("Bearer \(credential.accessToken)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw EventEnrichmentError.unavailable }
+        logger.info("event_enrichment.request.response endpoint=file/info status=\(http.statusCode, privacy: .public)")
         if http.statusCode == 404 { return nil }
         if http.statusCode == 401 { throw CoreFailure(code: .authentication, retryable: false, userActionRequired: true) }
         guard (200..<300).contains(http.statusCode) else { throw EventEnrichmentError.unavailable }
@@ -220,6 +226,7 @@ public final class CloudreveReconciliationService: @unchecked Sendable {
     private let credentialReference: String
     private let session: URLSession
     private let credentialRefresh: CredentialRefreshService
+    private let logger = Logger(subsystem: "ai.tiy.nimbussync", category: "reconciliation")
 
     public init(origin: URL, store: SQLiteStateStore, registry: SQLiteStateStore? = nil, vault: CredentialVault, credentialReference: String, session: URLSession? = nil) {
         self.origin = origin; self.store = store; self.registry = registry; self.vault = vault; self.credentialReference = credentialReference
@@ -228,7 +235,9 @@ public final class CloudreveReconciliationService: @unchecked Sendable {
         else { self.session = URLSession(configuration: .ephemeral, delegate: EventRedirectPolicy(), delegateQueue: nil) }
     }
 
-    public func reconcile(descriptor: DomainDescriptor) async throws {
+    public func reconcile(descriptor: DomainDescriptor, reason: String = "unspecified") async throws {
+        let correlationID = UUID().uuidString.lowercased()
+        logger.info("reconcile.started id=\(correlationID, privacy: .public) domain=\(descriptor.identifier, privacy: .public) reason=\(reason, privacy: .public)")
         let activeRun = try store.activeReconcileRuns().first(where: { $0.scope == descriptor.currentRootURI })
         let runID = activeRun?.id ?? UUID()
         var savedCursor = activeRun?.cursor.flatMap { try? JSONDecoder().decode(ReconcileCursor.self, from: Data($0.utf8)) }
@@ -269,6 +278,7 @@ public final class CloudreveReconciliationService: @unchecked Sendable {
             currentWork = current
             repeat {
                 let response = try await list(uri: current.uri, page: Int32(page), token: token)
+                logger.info("reconcile.page id=\(correlationID, privacy: .public) page=\(page, privacy: .public) token=\(token != nil, privacy: .public) items=\(response.files.count, privacy: .public)")
                 try store.updateReconcile(runID: runID, phase: "scanning_normal", cursor: token ?? "page:\(page)", state: "active")
                 for file in response.files {
                     guard file.id != descriptor.rootRemoteID else { continue }
@@ -303,8 +313,11 @@ public final class CloudreveReconciliationService: @unchecked Sendable {
         _ = seen
         try store.updateReconcile(runID: runID, phase: "completed", cursor: nil, state: "completed")
         try store.updateSyncState(reconcileAt: Date(), reconcileStatus: "completed")
+        logger.info("reconcile.completed id=\(correlationID, privacy: .public) domain=\(descriptor.identifier, privacy: .public)")
         } catch {
             try? store.updateReconcile(runID: runID, phase: "failed", cursor: nil, state: "failed")
+            try? store.updateSyncState(reconcileStatus: "error:\(reconciliationErrorCode(error))")
+            logger.error("reconcile.failed id=\(correlationID, privacy: .public) domain=\(descriptor.identifier, privacy: .public) code=\(reconciliationErrorCode(error), privacy: .public)")
             throw error
         }
     }
@@ -336,12 +349,14 @@ public final class CloudreveReconciliationService: @unchecked Sendable {
         var components = URLComponents(url: origin.appendingPathComponent("api/v4").appendingPathComponent(path), resolvingAgainstBaseURL: false)
         components?.queryItems = query
         guard let url = components?.url else { throw CoreFailure(code: .network, retryable: true) }
+        logger.info("reconcile.request.begin endpoint=\(path, privacy: .public)")
         let credential = try await credentialRefresh.credential(origin: origin, reference: credentialReference)
         var request = URLRequest(url: url, timeoutInterval: 30)
         request.setValue("Bearer \(credential.accessToken)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw CoreFailure(code: .network, retryable: true) }
+        logger.info("reconcile.request.response endpoint=\(path, privacy: .public) status=\(http.statusCode, privacy: .public)")
         if http.statusCode == 401 { throw CoreFailure(code: .authentication, retryable: false, userActionRequired: true) }
         if http.statusCode == 404 { return nil }
         guard (200..<300).contains(http.statusCode) else { throw CoreFailure(code: .network, retryable: true) }
@@ -358,6 +373,22 @@ public final class CloudreveReconciliationService: @unchecked Sendable {
         let writable = file.capability.map { $0.contains("w") } ?? false
         return RemoteItem(itemIdentifier: itemIdentifier, remoteID: file.id, parentIdentifier: parentIdentifier, name: file.name, uri: normalizedPath, kind: kind, contentType: kind == .folder ? "public.folder" : "public.data", size: max(0, file.size ?? 0), remoteVersion: file.primaryEntity, version: ItemVersion(content: VersionHasher.content(primaryEntity: contentRevision), metadata: VersionHasher.metadata(parent: parentIdentifier, name: file.name, kind: kind, permissionBits: readable ? 1 : 0, revision: file.updatedAt)), creationDate: parseEventDate(file.createdAt), contentModificationDate: parseEventDate(file.updatedAt), canRead: readable, canWrite: writable && readable, canAddChildren: writable && readable && kind == .folder, canTrash: false, canDelete: false)
     }
+}
+
+func reconciliationErrorCode(_ error: Error) -> String {
+    if let failure = error as? CoreFailure { return failure.code.rawValue }
+    if let failure = error as? StoreBridgeError {
+        switch failure {
+        case .openFailed: return "store_open_failed"
+        case .sql: return "store_sql"
+        case .schemaFenced: return "schema_fenced"
+        case .corrupted: return "store_corrupted"
+        case .unknownDomain: return "unknown_domain"
+        }
+    }
+    if error is CancellationError { return "cancelled" }
+    let nsError = error as NSError
+    return "error_\(nsError.domain)_\(nsError.code)"
 }
 
 public struct StableRootObservation: Sendable, Equatable {
@@ -603,7 +634,7 @@ public actor DomainEventRuntime: EventSupervisorDelegate {
     private let registry: SQLiteStateStore?
     private var pipeline: EventNormalizationPipeline
     private let reconciler: CloudreveReconciliationService
-    private let outboxDrainer: SignalOutboxDrainer?
+    private let outboxDrainer: SignalOutboxDrainer
     private let vault: CredentialVault
     private var connectionState: ConnectionState = .stopped
     private let domainIdentifier: String
@@ -622,8 +653,8 @@ public actor DomainEventRuntime: EventSupervisorDelegate {
         let enricher = CloudreveEventEnricher(origin: origin, rootURI: descriptor.currentRootURI, rootRemoteID: descriptor.rootRemoteID, store: store, vault: vault, credentialReference: descriptor.secretReference)
         self.reconciler = CloudreveReconciliationService(origin: origin, store: store, registry: registry, vault: vault, credentialReference: descriptor.secretReference)
         let domain = NSFileProviderDomain(identifier: NSFileProviderDomainIdentifier(descriptor.identifier), displayName: descriptor.displayName)
-        let signaller = NSFileProviderManager(for: domain).map(FileProviderWorkingSetSignaller.init(manager:))
-        let drainer = signaller.map { SignalOutboxDrainer(store: store, signaller: $0) }
+        let signaller = FileProviderWorkingSetSignaller(domain: domain)
+        let drainer = SignalOutboxDrainer(store: store, signaller: signaller)
         self.outboxDrainer = drainer
         self.pipeline = EventNormalizationPipeline(scopeGuard: EventScopeGuard(rootRemoteID: descriptor.rootRemoteID, rootURI: descriptor.currentRootURI), enricher: enricher, writer: EventJournalWriter(store: store, outboxDrainer: drainer))
     }
@@ -655,8 +686,11 @@ public actor DomainEventRuntime: EventSupervisorDelegate {
             guard let descriptor = try store.domain(identifier: domainIdentifier), let scope = try? RemoteScope(origin: descriptor.origin, accountID: descriptor.accountID, rootURI: descriptor.rootURI) else { throw CoreFailure(code: .unknownOutcome, retryable: true) }
             var model = DomainDescriptor(identifier: descriptor.identifier, displayName: descriptor.displayName, scope: scope, rootRemoteID: descriptor.rootRemoteID, accountID: descriptor.accountID, secretReference: descriptor.secretReference, capabilitySnapshot: descriptor.capabilitySnapshot, iconURL: descriptor.iconURL)
             model.status = .reconciling
-            try await reconciler.reconcile(descriptor: model)
-            await outboxDrainer?.drain()
+            try await reconciler.reconcile(descriptor: model, reason: reason)
+            guard await outboxDrainer.drain() else {
+                await markEventDegraded()
+                return
+            }
             let updated: StoredDomain?
             do { updated = try store.domain(identifier: domainIdentifier) } catch {
                 await markEventDegraded()
@@ -726,7 +760,7 @@ public actor DomainEventRuntime: EventSupervisorDelegate {
         case .subscribed:
             try? store.setDomainStatus(identifier: domainIdentifier, status: .reconciling)
             try? registry?.setDomainStatus(identifier: domainIdentifier, status: .reconciling)
-            await outboxDrainer?.drain()
+            _ = await outboxDrainer.drain()
         case .authExpired:
             await markAuthenticationExpired()
         case .resumedUnknownGap:

@@ -1,5 +1,6 @@
 import SwiftUI
 import Combine
+import AppKit
 import CloudreveDomainKit
 
 public struct OnboardingView: View {
@@ -22,6 +23,7 @@ public struct OnboardingView: View {
                 Spacer()
                 if isWorking {
                     ProgressView()
+                        .controlSize(.small)
                     Button("Cancel", action: onCancel).buttonStyle(.bordered)
                 }
                 Button("Continue") { onContinue(origin) }.buttonStyle(.borderedProminent).disabled(origin.isEmpty || isWorking)
@@ -29,8 +31,21 @@ public struct OnboardingView: View {
         }
         .padding(24)
         .frame(width: 480)
+        .tint(Color(red: 5 / 255, green: 111 / 255, blue: 238 / 255))
         .accessibilityElement(children: .contain)
-        .onAppear { originFieldIsFocused = true }
+        .onAppear(perform: focusOriginField)
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { notification in
+            guard let window = notification.object as? NSWindow,
+                  window.title == "Welcome to NimbusSync" else { return }
+            focusOriginField()
+        }
+    }
+
+    private func focusOriginField() {
+        originFieldIsFocused = false
+        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(100)) {
+            originFieldIsFocused = true
+        }
     }
 }
 

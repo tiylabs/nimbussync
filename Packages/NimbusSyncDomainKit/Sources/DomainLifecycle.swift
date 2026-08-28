@@ -1,17 +1,152 @@
 import Foundation
 import FileProvider
 
-public enum DomainLifecycleError: Error, Equatable {
+public enum DomainLifecycleError: Error, Equatable, LocalizedError, Sendable {
     case invalidIdentifier
     case overlappingScope
     case notFound
     case dirtyData
     case system(ErrorDescription)
+
+    public var errorDescription: String? {
+        switch self {
+        case .invalidIdentifier:
+            "The File Provider domain identifier is invalid."
+        case .overlappingScope:
+            "This Cloudreve location overlaps an existing location."
+        case .notFound:
+            "The File Provider domain could not be found."
+        case .dirtyData:
+            "Local changes must be preserved before this domain can be removed."
+        case let .system(description):
+            description.userMessage
+        }
+    }
+
+    public var diagnosticDescription: String {
+        switch self {
+        case .invalidIdentifier:
+            "invalid_domain_identifier"
+        case .overlappingScope:
+            "overlapping_scope"
+        case .notFound:
+            "domain_not_found"
+        case .dirtyData:
+            "dirty_data"
+        case let .system(description):
+            description.diagnosticDescription
+        }
+    }
 }
 
-public struct ErrorDescription: Equatable, Sendable {
+private final class CallbackTimeoutGate<Value: Sendable>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<Value, Error>?
+
+    init(_ continuation: CheckedContinuation<Value, Error>) {
+        self.continuation = continuation
+    }
+
+    func succeed(_ value: Value) {
+        lock.lock()
+        guard let continuation else {
+            lock.unlock()
+            return
+        }
+        self.continuation = nil
+        lock.unlock()
+        continuation.resume(returning: value)
+    }
+
+    func fail(_ error: DomainLifecycleError) {
+        lock.lock()
+        guard let continuation else {
+            lock.unlock()
+            return
+        }
+        self.continuation = nil
+        lock.unlock()
+        continuation.resume(throwing: error)
+    }
+}
+
+private func withCallbackTimeout<Value: Sendable>(
+    seconds: TimeInterval = 30,
+    operation: (@escaping @Sendable (Result<Value, DomainLifecycleError>) -> Void) -> Void
+) async throws -> Value {
+    try await withCheckedThrowingContinuation { continuation in
+        let gate = CallbackTimeoutGate(continuation)
+        operation { result in
+            switch result {
+            case let .success(value): gate.succeed(value)
+            case let .failure(error): gate.fail(error)
+            }
+        }
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + seconds) {
+            gate.fail(.system(ErrorDescription("File Provider request timed out")))
+        }
+    }
+}
+
+public struct ErrorDescription: Equatable, Sendable, CustomStringConvertible {
     public let message: String
-    public init(_ message: String) { self.message = message }
+    public let domain: String?
+    public let code: Int?
+
+    public init(_ message: String, domain: String? = nil, code: Int? = nil) {
+        self.message = message
+        self.domain = domain
+        self.code = code
+    }
+
+    public var description: String { diagnosticDescription }
+
+    public var diagnosticDescription: String {
+        guard let domain else { return "file_provider_request_failed" }
+        if let code { return "file_provider_error:\(domain):\(code)" }
+        return "file_provider_error:\(domain)"
+    }
+
+    public var userMessage: String {
+        guard let domain, let code else {
+            return "The File Provider service could not complete this request."
+        }
+
+        if domain == "NSFileProviderErrorDomain" {
+            switch code {
+            case -2001:
+                return "NimbusSync's File Provider extension is unavailable. Quit and reopen NimbusSync, then try again."
+            case -2002:
+                return "macOS disabled the File Provider extension because NimbusSync is running from a translocated location. Move NimbusSync to Applications and reopen it."
+            case -2003:
+                return "An older NimbusSync File Provider extension is still running. Quit and reopen NimbusSync, then try again."
+            case -2004:
+                return "A newer NimbusSync File Provider extension is already installed. Update NimbusSync and try again."
+            case -2011:
+                return "This File Provider domain is disabled in System Settings. Enable NimbusSync under File Providers, then try again."
+            case -2012:
+                return "The File Provider service is temporarily unavailable. Try again in a moment."
+            case -2014:
+                return "NimbusSync's File Provider extension is missing from the app bundle. Reinstall NimbusSync and try again."
+            default:
+                break
+            }
+        }
+
+        if domain == "NSFileProviderInternalErrorDomain", code == 12 {
+            return "This File Provider domain is disabled in System Settings. Enable NimbusSync under File Providers, then try again."
+        }
+
+        if domain == "NSCocoaErrorDomain", code == 513 {
+            return "The File Provider document storage is not writable. Check the app's permissions and try again."
+        }
+
+        if domain == "NSCocoaErrorDomain", code == 516 || (domain == "NSPOSIXErrorDomain" && code == 17) {
+            return "A previous NimbusSync Finder location is still registered on this Mac. Remove the old location in System Settings > General > Login Items & Extensions > File Providers, then try again."
+        }
+
+        return "The File Provider service rejected this request. Check System Settings > General > Login Items & Extensions > File Providers, then try again."
+    }
 }
 
 public struct RegisteredDomainSnapshot: Equatable, Sendable {
@@ -72,37 +207,69 @@ public final class DomainLifecycleService: @unchecked Sendable {
     }
 
     public func add(_ domain: NSFileProviderDomain) async throws {
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+        try await withCallbackTimeout { (complete: @escaping @Sendable (Result<Void, DomainLifecycleError>) -> Void) in
             NSFileProviderManager.add(domain) { error in
-                if let error { continuation.resume(throwing: DomainLifecycleError.system(ErrorDescription(error.localizedDescription))) }
-                else { continuation.resume() }
+                if let error {
+                    let nsError = error as NSError
+                    complete(.failure(.system(ErrorDescription(error.localizedDescription, domain: nsError.domain, code: nsError.code))))
+                }
+                else { complete(.success(())) }
             }
         }
     }
 
     public func registeredDomains() async throws -> [RegisteredDomainSnapshot] {
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<[RegisteredDomainSnapshot], Error>) in
+        try await withCallbackTimeout { (complete: @escaping @Sendable (Result<[RegisteredDomainSnapshot], DomainLifecycleError>) -> Void) in
             NSFileProviderManager.getDomainsWithCompletionHandler { domains, error in
-                if let error { continuation.resume(throwing: DomainLifecycleError.system(ErrorDescription(error.localizedDescription))) }
-                else { continuation.resume(returning: domains.map { RegisteredDomainSnapshot(identifier: $0.identifier.rawValue, displayName: $0.displayName) }) }
+                if let error {
+                    let nsError = error as NSError
+                    complete(.failure(.system(ErrorDescription(error.localizedDescription, domain: nsError.domain, code: nsError.code))))
+                }
+                else { complete(.success(domains.map { RegisteredDomainSnapshot(identifier: $0.identifier.rawValue, displayName: $0.displayName) })) }
+            }
+        }
+    }
+
+    public func systemDomainExists(_ identifier: String) async throws -> Bool {
+        let domains = try await registeredDomains()
+        return domains.contains { $0.identifier == identifier }
+    }
+
+    public func waitForChanges(below domain: NSFileProviderDomain) async throws -> Bool {
+        guard let manager = NSFileProviderManager(for: domain) else {
+            throw DomainLifecycleError.system(ErrorDescription("File Provider manager is unavailable"))
+        }
+        return try await withCallbackTimeout(seconds: 15) { (complete: @escaping @Sendable (Result<Bool, DomainLifecycleError>) -> Void) in
+            manager.waitForChanges(below: .rootContainer) { error in
+                if let error {
+                    let nsError = error as NSError
+                    complete(.failure(.system(ErrorDescription(error.localizedDescription, domain: nsError.domain, code: nsError.code))))
+                }
+                else { complete(.success(true)) }
             }
         }
     }
 
     public func remove(_ domain: NSFileProviderDomain, preserveDirtyData: Bool) async throws -> URL? {
         if #available(macOS 14.0, *), preserveDirtyData {
-            return try await withCheckedThrowingContinuation { continuation in
+            return try await withCallbackTimeout { (complete: @escaping @Sendable (Result<URL?, DomainLifecycleError>) -> Void) in
                 NSFileProviderManager.remove(domain, mode: .preserveDirtyUserData) { location, error in
-                    if let error { continuation.resume(throwing: DomainLifecycleError.system(ErrorDescription(error.localizedDescription))) }
-                    else { continuation.resume(returning: location) }
+                    if let error {
+                        let nsError = error as NSError
+                        complete(.failure(.system(ErrorDescription(error.localizedDescription, domain: nsError.domain, code: nsError.code))))
+                    }
+                    else { complete(.success(location)) }
                 }
             }
         }
         if preserveDirtyData { throw DomainLifecycleError.dirtyData }
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+        try await withCallbackTimeout { (complete: @escaping @Sendable (Result<Void, DomainLifecycleError>) -> Void) in
             NSFileProviderManager.remove(domain) { error in
-                if let error { continuation.resume(throwing: DomainLifecycleError.system(ErrorDescription(error.localizedDescription))) }
-                else { continuation.resume() }
+                if let error {
+                    let nsError = error as NSError
+                    complete(.failure(.system(ErrorDescription(error.localizedDescription, domain: nsError.domain, code: nsError.code))))
+                }
+                else { complete(.success(())) }
             }
         }
         return nil

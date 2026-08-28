@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 import CloudreveAuthKit
 import CloudreveDomainKit
 
@@ -55,6 +56,7 @@ private actor SSEStreamState {
     private let session: URLSession
     private let credentialRefresh: CredentialRefreshService
     private let channel = AsyncStreamChannel()
+    private let logger = Logger(subsystem: "ai.tiy.nimbussync", category: "remote-events")
     private var started = false
     private var task: Task<Void, Never>?
 
@@ -90,21 +92,26 @@ private actor SSEStreamState {
                     request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
                     request.setValue(clientID, forHTTPHeaderField: "X-Cr-Client-Id")
                     request.setValue("Bearer \(credential.accessToken)", forHTTPHeaderField: "Authorization")
+                    logger.info("sse.connect.begin endpoint=file/events")
                     var (bytes, response) = try await session.bytes(for: request)
                     if (response as? HTTPURLResponse)?.statusCode == 401 {
                         credential = try await credentialRefresh.credential(origin: origin, reference: credentialReference, forceRefresh: true)
                         request.setValue("Bearer \(credential.accessToken)", forHTTPHeaderField: "Authorization")
                         (bytes, response) = try await session.bytes(for: request)
                     }
-                    guard let http = response as? HTTPURLResponse, http.statusCode == 200, http.value(forHTTPHeaderField: "Content-Type")?.contains("text/event-stream") == true else { throw CoreFailure(code: .network, retryable: true) }
+                    guard let http = response as? HTTPURLResponse else { throw CoreFailure(code: .network, retryable: true) }
+                    logger.info("sse.connect.response endpoint=file/events status=\(http.statusCode, privacy: .public)")
+                    guard http.statusCode == 200, http.value(forHTTPHeaderField: "Content-Type")?.contains("text/event-stream") == true else { throw CoreFailure(code: .network, retryable: true) }
                     let parser = SSEParser()
                     for try await line in bytes.lines {
                         let events = try parser.append(Data((line + "\n").utf8))
                         for event in events { await channel.yield(event) }
                     }
                     for event in try parser.finish() { await channel.yield(event) }
+                    logger.info("sse.stream.ended endpoint=file/events")
                     await channel.finish()
                 } catch {
+                    logger.error("sse.stream.failed endpoint=file/events")
                     await channel.finish(error)
                 }
         }
