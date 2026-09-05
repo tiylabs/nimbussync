@@ -1,7 +1,7 @@
 # NimbusSync File Provider 对齐 Nextcloud Desktop 的设计与实施方案
 
 > 文档状态：Implementation Proposal
-> 日期：2026-08-30
+> 日期：2026-09-05
 > 适用版本：NimbusSync Technical Preview / Beta，macOS 13+
 > 参考实现：Nextcloud Desktop `3769349affcab99aee8ba6dd15b80bd632829beb`
 > 前置文档：[产品需求](./01-macos-product-requirements.md)、[技术架构](./02-macos-technical-architecture.md)、[阶段 0](./03-phase-0-protocol-file-provider-spike.md)、[阶段 1](./04-phase-1-persistence-read-path.md)、[阶段 2](./05-phase-2-write-path-upload-recovery.md)、[阶段 3](./06-phase-3-events-consistency.md)、[阶段 4](./07-phase-4-product-release.md)
@@ -20,7 +20,7 @@
 4. 让大文件传输可取消、可报告进度、可跨进程恢复，并避免按文件大小线性占用内存。
 5. 在 Cloudreve 条件写契约验证后阻止静默覆盖，并适配 macOS 26 的原生冲突协议。
 6. 处理父目录缺失、目录移动、trash、排除规则和特殊文件，不把不确定状态误判为删除。
-7. 让 Finder actions、item decoration、content policy 和 Extension 版本升级后的缓存刷新保持一致。
+7. 让 Finder actions、item decoration、content policy 和 projection schema 升级后的缓存刷新保持一致。
 8. 形成以本地单元测试、故障注入、签名 Finder E2E 和长稳证据分层的验收闭环。
 
 ### 1.2 当前基线
@@ -39,7 +39,7 @@ NimbusSync 当前的 File Provider 入口位于 [Extensions/NimbusSyncFileProvid
 当前仍需以源码和实机验证为准的主要边界：
 
 - 通用 Enumerator 尚未像 Nextcloud 一样对 working set/trash 做独立 item enumeration；
-- change enumeration 没有保存一次派生结果的独立 durable delivery session；
+- change journal 尚未保存可独立重放的 immutable item/tombstone projection；
 - schema fence 当前主要映射为 `cannotSynchronize`，而非明确的 `syncAnchorExpired`；
 - `materializedItemsDidChange`/`pendingItemsDidChange` 目前主要设置 refresh flag，尚未完整消费系统集合；
 - `NimbusSyncFileProviderItem` 的 upload/download 状态、child count、file-system flags、keep-downloaded 和 eviction 语义较少；
@@ -69,6 +69,7 @@ NimbusSync 当前的 File Provider 入口位于 [Extensions/NimbusSyncFileProvid
 - 不在 Cloudreve 条件写、trash、Provider 上传或签名环境未验证前开放对应写能力。
 - 不因修复 Finder 展示问题而删除 dirty user data、远端对象或 pending operation。
 - 不在本方案中实现任意本地目录 Classic Sync；该能力应是独立的 `LocalMirrorAdapter` 后续方案。
+- v1 不在 create/modify completion 后继续依赖系统 contents URL 做 detached upload；需要提前 completion 的后台上传必须另行定义独立、持久且用户可恢复的 source ownership 合同。
 
 ## 2. 不可破坏的架构原则
 
@@ -91,7 +92,7 @@ NimbusSync 当前的 File Provider 入口位于 [Extensions/NimbusSyncFileProvid
 flowchart LR
     Finder[Finder / fileproviderd]
     FP[NimbusSyncFileProvider.appex\ncontainer dispatch + callbacks]
-    Store[(App Group SQLite\nitems / snapshots / delivery / ops)]
+    Store[(App Group SQLite\nitems / snapshots / journal / ops)]
     KC[(Keychain\nOAuth + opaque upload secrets)]
     Remote[CloudreveBackend\nasync content + mutation]
     App[NimbusSync.app\nSSE / reconciliation / settings]
@@ -114,10 +115,10 @@ flowchart LR
 | 组件 | 目标职责 | 明确不负责 |
 |---|---|---|
 | `NimbusSyncFileProviderExtension` | Domain 初始化、容器分派、callback deadline、状态投影 | 不维护永久 SSE，不依赖 App RPC |
-| `WorkingSetEnumerator` | materialized/visited working set 的 item/change enumeration | 不把整个远端树默认当作 working set |
+| `WorkingSetEnumerator` | materialized/visited 目录的直接子项、活跃本地状态及 trash 顶层 item 的 item/change enumeration | 不把整个远端树默认当作 working set |
 | `DirectoryEnumerator` | 远端目录分页、快照 generation、父子顺序 | 不在不完整结果上生成批量删除 |
 | `TrashEnumerator` | 能力验证后的 trash 列表、恢复和永久删除显示 | 未验证时不伪造 trash |
-| `ChangeDeliveryStore` | immutable change session、确定性 continuation cursor、可重放 batch payload | 不存 token 或文件内容，不在读取 batch 时破坏旧 cursor |
+| `ChangeJournalStore` | immutable provider-visible delta、sequence anchor、bounded replay 和 compaction | 不存 token 或文件内容，不从 live row 重建历史 payload |
 | `SystemSetCoordinator` | materialized/pending 集合的分代扫描、原子发布、状态合并 | 不把部分/capped 集合当作完整事实，不替代 operation 事实源 |
 | `CloudreveAsyncBackend` | 异步下载、上传、条件写、trash、任务注册和错误映射 | 不持有 SwiftUI 或 Finder 对象 |
 | `EventCoordinator` | SSE、enrichment、reconciliation、journal/outbox | 不直接修改 Finder 文件系统 |
@@ -134,58 +135,54 @@ flowchart LR
 | Nextcloud 概念 | NimbusSync 现有/目标映射 |
 |---|---|
 | `RealmItemMetadata` | `items` + materialized/pending 状态 |
-| `RealmChangeDeliverySession` | 新增 `fp_change_delivery_sessions` |
-| `RealmChangeDeliveryItem` | 新增 `fp_change_delivery_items` |
+| `RealmChangeDeliverySession` / `RealmChangeDeliveryItem` | 由现有 `change_journal` 的 immutable payload、sequence anchor 和保留窗口提供等价重放能力，不复制其 Realm session 模型 |
 | `ocId` | opaque `item_uuid`，另存 `remote_entity_id` |
 | ETag | Cloudreve `remote_version` + content/metadata version |
 | `chunkUploadId`/`RemoteFileChunk` | `upload_sessions` + `upload_parts` |
 | `IgnoredFilesMatcher` | `ExclusionRuleSet` + rule revision + exclusion intents |
 | notify-push | Cloudreve SSE hint + metadata enrichment + reconciliation |
 
-### 4.2 新增 immutable change delivery 表
+本方案实施期间，[`SQLiteStateStore`](/Users/jorben/Documents/Codespace/tiylabs/nimbussync/Packages/NimbusSyncStoreBridge/Sources/NimbusSyncStoreBridge.swift:154) 是生产 App Group SQLite 的唯一 schema bootstrap、migration 和写入 owner。`Rust/crates/cloudreve-store` 同步维护 schema v7 DDL、repository 语义和单元测试，作为兼容镜像与未来 UniFFI 切换准备，但当前 Rust 进程不得打开或迁移生产 Domain 数据库。Phase A 增加 `SchemaParityTests`，比较 Swift/Rust 的 schema version、表、列、索引和约束 manifest；任一侧漂移即阻断构建。把生产 owner 切换到 Rust/UniFFI 必须另设一次性迁移和实机门禁，不与本方案的 v7 migration 并行发生。
 
-新增 schema generation（建议作为 Store schema v7 或后续版本），至少包含：
+### 4.2 扩展 provider-side change journal
 
-```sql
-CREATE TABLE fp_change_delivery_sessions (
-    session_id TEXT PRIMARY KEY,
-    domain_id TEXT NOT NULL,
-    container_id TEXT NOT NULL,
-    incoming_anchor_digest BLOB NOT NULL,
-    incoming_epoch TEXT NOT NULL,
-    incoming_sequence INTEGER NOT NULL,
-    final_epoch TEXT NOT NULL,
-    final_sequence INTEGER NOT NULL,
-    derivation_state TEXT NOT NULL, -- preparing / ready / abandoned
-    payload_version INTEGER NOT NULL,
-    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
-    updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
-    expires_at INTEGER NOT NULL,
-    UNIQUE (domain_id, container_id, incoming_anchor_digest)
-);
+新增 schema generation（建议作为 Store schema v7 或后续版本），扩展现有 `change_journal`，不再建立第二套 delivery session/item 状态：
 
-CREATE TABLE fp_change_delivery_items (
-    session_id TEXT NOT NULL,
-    delivery_offset INTEGER NOT NULL,
+```text
+由 schema migration 扩展现有表；以下为目标字段形态，不是可直接执行的迁移 SQL。
+change_journal (
+    sequence INTEGER PRIMARY KEY,
+    epoch TEXT NOT NULL,
     item_uuid TEXT NOT NULL,
-    deleted INTEGER NOT NULL DEFAULT 0,
     old_parent_uuid TEXT,
     new_parent_uuid TEXT,
+    change_kind TEXT NOT NULL,
     item_payload BLOB NOT NULL,
     item_version BLOB,
-    PRIMARY KEY (session_id, delivery_offset),
-    FOREIGN KEY (session_id) REFERENCES fp_change_delivery_sessions(session_id) ON DELETE CASCADE
+    origin TEXT NOT NULL,
+    delivery_audience TEXT NOT NULL,
+    created_at INTEGER NOT NULL
 );
-
-CREATE INDEX fp_change_delivery_expiry
-    ON fp_change_delivery_sessions(expires_at, derivation_state);
 ```
 
-`item_payload` 保存形成 session 时的不可变、紧凑、版本化 item projection，不保存文件内容、token 或 signed URL。交付时不得仅凭 `item_uuid` 读取可能已经变化的 live row，否则同一 continuation anchor 无法确定性重放。删除项必须保存完成重放所需的 tombstone projection。
+`item_payload` 保存 journal commit 时形成的不可变、紧凑、版本化 item projection；删除 row 保存完成重放所需的 tombstone projection。payload 不包含文件内容、token、signed URL 或敏感路径。Change enumeration 只读取 journal payload，不根据 `item_uuid` 从可能已经变化或删除的 live row 重建历史结果。
 
-continuation anchor 编码 `formatVersion + sessionID + deliveryOffset + integrityTag`。读取 batch 是纯查询，不更新或删除 session/item；相同 anchor 必须得到相同结果。只有观察到系统从该 session 的 final anchor 或更晚普通 anchor 继续请求后，session 才进入可回收状态，并继续保留有界 TTL 以覆盖重放窗口。
+旧 schema 的 journal row 没有完整 payload，迁移时不得从当前 live row 伪造历史 projection。v6→v7 在一个 `BEGIN IMMEDIATE` 事务内完成以下终态：
 
-普通 anchor 的处理顺序同样必须支持重放：先计算 incoming anchor digest 并查找已有 ready session；命中时从 offset 0 返回该 session 的首 batch，未命中时才校验 journal minimum sequence 并派生新 session。`preparing` session 不可交付；若进程在分批写入期间终止，下次启动清理或从同一 incoming anchor 重新派生，最后一次事务把 payload 标记为 ready。Journal compaction 必须同时考虑 active/TTL session，不能让仍可重放的 incoming anchor 失去对应 payload。
+1. 将 `schema_meta.migration_state` 置为 `preparing` 并建立 v7 表、列、索引和约束；
+2. 保留 `items`、`operations`、`pending_items`、`upload_sessions/parts`、`conflicts`、`exclusion_intents` 和 dirty-data 保护状态；
+3. 清空不可重放的旧 `change_journal` 和对应旧 `signal_outbox`；
+4. 生成新 epoch，设置 `next_sequence=1`、`min_valid_sequence=0`，递增 `domain_version_revision` 和 schema generation，并把 reconciliation 状态置为 `required`，使迁移前启动的 App/Extension 进程继续保持 fenced；
+5. 插入新 epoch revision 0 的 pending working-set signal intent；
+6. 将 schema version/compat range 更新为 v7、`migration_state` 置为 `ready` 后提交。
+
+事务提交前终止必须完整回滚到可打开的 v6；提交后任意进程第一次 drain 都能看到新 signal intent，使旧系统 anchor 明确过期并触发 fresh enumeration。迁移不得出现“v7 已提交但无 reconcile/signal intent”的中间终态。
+
+Event/reconciliation producer 在提交前按 stable identity 折叠同一原子结果，并以父先子后、删除子先父后的顺序分配 sequence。折叠合同为：`create + modify -> final upsert`；同一 producer result 内、在此前从未存在的 `create + delete -> no-op`；`modify/move + delete -> delete`；连续 move 保留 first old parent 与 final new parent；delete 后同一 stable remote identity 重新出现时按最终事实投影为 update。cycle、缺失父链或不可解释序列只隔离对应依赖分支并保留 reconciliation retry，独立且完整的分支仍可提交。
+
+Change enumeration 从 incoming sequence 后按全局 sequence 有界扫描，再按 container scope 过滤。遇到 relevant item budget 时停止；若扫描段均被过滤，仍把 anchor 推进到最后已扫描 sequence。相同 incoming anchor 在 journal 保留期内总是读取相同的 row、payload 和顺序；batch 边界可以根据当前 observer 的有效 `suggestedBatchSize` 在实现上限内调整，但不得遗漏 row 或越过尚未交付的 relevant row。
+
+读取 batch 是纯查询，不修改或删除 journal。系统在 `didUpdate/didDelete` 后、`finishEnumeratingChanges` 前终止时，从旧 anchor 重试会得到相同的 immutable delta；重复交付必须对本地投影无副作用，change enumeration 本身不得触发远端 mutation。Journal 按既有 7 天/100,000 条软保留目标和 1,000,000 条或 256 MiB 硬上限压缩；旧 sequence 被回收后明确返回 `.syncAnchorExpired`，不建立无绝对期限的 session payload。
 
 ### 4.3 Directory Snapshot 分代发布
 
@@ -222,52 +219,52 @@ CREATE TABLE directory_snapshot_heads (
     parent_uuid TEXT NOT NULL,
     current_snapshot_id TEXT NOT NULL,
     current_generation INTEGER NOT NULL,
-    PRIMARY KEY (domain_id, parent_uuid)
+    PRIMARY KEY (domain_id, parent_uuid),
+    FOREIGN KEY (current_snapshot_id) REFERENCES directory_snapshot_generations(snapshot_id) ON DELETE RESTRICT
 );
 ```
 
-服务端提供稳定 snapshot token 时允许直接使用受 token 约束的远端 cursor，不必复制全部 membership。服务端缺少该能力时，由可恢复 producer 写 staging generation；完整结束后在一个事务中更新 head。Enumerator 只读取 current head 的不可变 membership/payload。已有 complete snapshot 可先服务 Finder，再在后台刷新；首次没有 complete snapshot 时启动有 deadline 的 hydration，超时则返回可重试错误，由 producer 继续完成，不能退化为会漂移的 live offset 分页。
+服务端提供经 contract test 证明绑定稳定视图的 snapshot token 时，允许直接使用受 token 约束的远端 cursor，不必复制全部 membership；普通 `next_page_token` 只有在并发 insert/delete/rename 测试通过后才能视为 snapshot token。服务端缺少该能力时，由可恢复 producer 写 staging generation；完整结束后在一个事务中更新 head。Enumerator 读取 page token 指定的 complete snapshot，不强制只读 current head：旧 snapshot 在 TTL 内继续完成既有分页。已有 complete snapshot 可先服务 Finder，再在后台刷新；首次没有 complete snapshot 时启动有 deadline 的 hydration，超时则返回可重试错误，由 producer 继续完成，不能退化为会漂移的 live offset 分页。page token 指向的 snapshot 已超过 TTL 时返回 `.cannotSynchronize`，启动 fresh hydration，并在准备完成后 signal error resolved；不依赖 `.syncAnchorExpired` 在 item enumeration 中产生未定义的重新分页行为。
 
 ### 4.4 系统集合分代扫描
 
-materialized/pending 集合和缺少服务端 snapshot token 的目录枚举共用分代扫描原则：
+materialized/pending 集合复用现有 `system_set_state`、`materialized_containers` 和 `pending_items` 的职责，不建立通用 scan/items/heads 三层模型。`pending_items` 继续表示 NimbusSync operation 事实，新增轻量 `system_pending_observations` 只保存系统观察值。目标字段形态：
 
-```sql
-CREATE TABLE system_set_scans (
-    scan_id TEXT PRIMARY KEY,
-    domain_id TEXT NOT NULL,
-    kind TEXT NOT NULL, -- materialized / pending
-    generation INTEGER NOT NULL,
-    state TEXT NOT NULL, -- collecting / complete / failed
-    maximum_size_reached INTEGER NOT NULL DEFAULT 0,
-    domain_version BLOB,
-    next_page BLOB,
-    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
-    updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
-    expires_at INTEGER NOT NULL,
-    UNIQUE (domain_id, kind, generation)
-);
-
-CREATE TABLE system_set_scan_items (
-    scan_id TEXT NOT NULL,
-    item_uuid TEXT NOT NULL,
-    item_payload BLOB,
-    PRIMARY KEY (scan_id, item_uuid),
-    FOREIGN KEY (scan_id) REFERENCES system_set_scans(scan_id) ON DELETE CASCADE
-);
-
-CREATE TABLE system_set_heads (
-    domain_id TEXT NOT NULL,
-    kind TEXT NOT NULL,
-    current_scan_id TEXT NOT NULL,
+```text
+由 schema migration 扩展现有表；以下为目标字段形态，不是可直接执行的迁移 SQL。
+system_set_state (
+    set_kind TEXT PRIMARY KEY,
+    system_anchor BLOB,
+    refresh_required INTEGER NOT NULL,
+    refresh_cursor BLOB,
     current_generation INTEGER NOT NULL,
-    maximum_size_reached INTEGER NOT NULL DEFAULT 0,
+    active_generation INTEGER,
+    scan_state TEXT NOT NULL, -- idle / collecting / failed
+    maximum_size_reached INTEGER NOT NULL,
     domain_version BLOB,
-    PRIMARY KEY (domain_id, kind)
+    last_completed_at INTEGER
+);
+
+materialized_containers (
+    item_uuid TEXT PRIMARY KEY,
+    is_materialized INTEGER NOT NULL,
+    observed_generation INTEGER,
+    updated_at INTEGER NOT NULL
+);
+
+system_pending_observations (
+    item_uuid TEXT PRIMARY KEY,
+    is_pending INTEGER NOT NULL,
+    published_payload BLOB,
+    observed_generation INTEGER,
+    observed_payload BLOB,
+    updated_at INTEGER NOT NULL
 );
 ```
 
-每页只写 staging generation；只有收到成功结束后，才在一个事务中更新 head 并计算可证明的新增/移除差集。失败或中断保留 retry marker，不改变上一代事实。pending set 达到 maximum size 时可以发布本轮可见子集和 capped 标志，但只更新“系统存在未完全展示的 pending activity”，不得依据缺席项清除 operation/error 状态。scan/head 同样受 TTL、配额和分代 compaction 约束。
+每个 page 只写对应 row 的 `observed_generation/observed_payload`，不改变已发布状态。materialized 扫描完整成功后，在一个事务中把当前 generation 的观察值提升为 `is_materialized=true`，并把上一代存在但本代缺席的 row 置为 false。pending 扫描完整且未 capped 时，同样提升本代并清除缺席 membership；完整但 capped 时只提升本轮明确出现的 item 和 capped 标志，不按缺席清理；失败或中断只保留 retry cursor，不改变上一代事实。完成后清除旧 observed payload，状态容量与 item 数量同阶且不存在重复 snapshot payload。
+
+App 和 Extension 通过 App Group `Locks/system-set-<domain-id>-<set-kind>.lock` 使用带 deadline 的 POSIX advisory lock 竞争同一 set worker。获得锁后在事务中读取并恢复现有 `active_generation`，或以 `current_generation + 1` 原子创建新 generation；每页写入、cursor 更新和最终 publish 都使用 `WHERE active_generation = claimed_generation` fencing。未获得锁的进程保留 `refresh_required=1` 并结束当前 callback，不启动内存后台任务。owner 终止后 advisory lock 由内核释放，下一 owner 从持久 cursor 继续；旧 owner 恢复后因 generation 不匹配不得写入或发布。
 
 ### 4.5 Item 本地状态分层
 
@@ -327,7 +324,7 @@ task 必须以 suspended 状态创建，等待 `registerSuspended` 成功后才�
 #### 需求目标
 
 - `enumerator(for:)` 能识别 `.workingSet`、`.rootContainer`、普通 directory、`.trashContainer`。
-- working set 初始枚举返回系统跟踪的 materialized 文件和 visited directory，而不是把 `workingSet` 当作普通 parent UUID。
+- working set 初始枚举返回 materialized/visited 目录的直接子项、活跃本地状态和 trash 顶层 item，而不是把 `workingSet` 当作普通 parent UUID。
 - trash 只有在 Cloudreve trash/restore 契约验证后才对系统可见。
 - 目录分页有稳定 snapshot generation；旧 page 不会跨快照错误复用。
 
@@ -343,15 +340,16 @@ trash            -> TrashEnumerator
 
 `WorkingSetEnumerator`：
 
-1. 从 Store 读取未 tombstone 的 materialized file、visited directory，以及明确标记为 recent/shared/favorite/tagged/trashed 的 provider item。
-2. 以稳定 `(item_uuid)` 排序并按系统 suggested page size 分页。
-3. working-set change 的成员谓词为：item 本身属于 working set，或 create/modify/delete 的 old/new parent 任一属于 materialized/visited container；移动场景同时检查 old/new parent。
-4. trash 顶层 item 保留在 working set，trashed directory 的 children 不进入 working set。
-5. 变化枚举只消费已经持久化的 provider-side journal；bounded reconciliation 先作为可恢复 producer job 完成并提交 journal，再 signal working set。
+1. v1 最小集合为未 tombstone 的 materialized file、materialized/visited directory 及其直接子项、active operation/conflict、系统已知 pending item 和 trash 顶层 item；recent/shared 仅在事实已持久化时接入，favorite/tagged 作为 P2 source。
+2. item enumeration 使用 keyset pagination，不使用 live offset：page token 保存 `workingSetRevision + lastItemUUID + projectionSchemaRevision + checksum`，下一页查询 `item_uuid > lastItemUUID`。
+3. page token 创建后的新增成员若排序在 cursor 前，由 `workingSetRevision` 之后的 provider journal 在 change enumeration 中补交；删除不会令 keyset cursor 跳过未变化成员。
+4. working-set change 的成员谓词为：item 本身属于 working set，或 create/modify/delete 的 old/new parent 任一属于 materialized/visited container；移动场景同时检查 old/new parent。
+5. trash 顶层 item 保留在 working set，trashed directory 的 children 不进入 working set。
+6. 变化枚举只消费已经持久化的 provider-side journal；bounded reconciliation 先作为可恢复 producer job 完成并提交 journal，再 signal working set。
 
 `DirectoryEnumerator`：
 
-1. 服务端存在稳定 snapshot/version token 时，page token 必须绑定该 token；token 变化后旧 page 明确失效。
+1. 服务端存在稳定 snapshot/version token 时，page token 必须绑定该 token；新 snapshot 发布不使仍在 TTL 内的旧 page 立即失效。
 2. 服务端没有稳定 token 时，每个远端 page 写入持久 `directory_snapshot_items(snapshot_id, item_uuid, sort_key)` staging 表；完整扫描后原子发布 generation，再从该不可变 snapshot 向系统分页。
 3. snapshot 未 complete 时不得参与 child count、批量 tombstone 或旧 generation 清理。
 4. snapshot 设置 TTL、单目录/单 Domain 磁盘上限和中断清理；达到上限时返回可诊断错误，不退化为 live offset 漂移分页。
@@ -365,8 +363,8 @@ trash            -> TrashEnumerator
 
 #### 实施步骤
 
-1. 定义 `FileProviderContainerKind` 和 page token v2，加入 container kind、domain、parent、snapshot generation、cursor、integrity tag。
-2. 新增 Store 的 `workingSetItems`、`trashItems`、`visitedContainers` 查询；必要时增加 `visited` 状态表或字段。
+1. 定义 `FileProviderContainerKind` 和 page token v2：working set 使用 revision/keyset cursor，普通目录使用 snapshot generation/cursor；两者都绑定 domain、container、projection schema 和 checksum。
+2. 新增 Store 的 `workingSetItems`、`trashItems`、`visitedContainers` 查询和统一 membership predicate；必要时增加 `visited` 状态表或字段。
 3. 增加 directory snapshot staging/membership 表、发布事务、TTL 和容量门禁。
 4. 拆分目录、working set、trash 的 item enumeration 和 change enumeration。
 5. 将 `signalEnumerator(.workingSet)` 只路由到 working-set change path。
@@ -375,19 +373,19 @@ trash            -> TrashEnumerator
 
 #### 验收标准
 
-- `AC-FP-001-1`：working-set 初始枚举返回 Store 中符合规则的 item，分页无重复/遗漏。
-- `AC-FP-001-2`：普通目录的 page token 绑定 domain、parent 和 snapshot generation；旧 generation 返回 `syncAnchorExpired` 或触发重新枚举。
+- `AC-FP-001-1`：working-set 初始枚举覆盖 materialized/visited 目录的直接子项、active operation/conflict、系统已知 pending item 和 trash 顶层 item，并使用 keyset cursor；分页期间并发 add/remove 不会静默漏项。
+- `AC-FP-001-2`：普通目录的 page token 绑定 domain、parent 和 snapshot generation；TTL 内的旧 generation 可继续完成分页，过期后返回可重试错误并完成 fresh hydration，不使用 change-anchor 过期语义处理 item page。
 - `AC-FP-001-3`：trash 未验证时不暴露 provider-synchronized TrashEnumerator/Restore/Purge，不把系统自行决定的本地 trash 行为解释为 Cloudreve trash；验证后可列出、恢复和永久删除。
 - `AC-FP-001-4`：working set 发生远端 create/modify/move/delete 时，App 退出后下一次系统请求仍能从持久状态得到正确结果。
 - `AC-FP-001-5`：远端目录在多页枚举期间并发 insert/delete/rename，不导致当前 snapshot 重复、遗漏或跨 generation 混用。
 - `AC-FP-001-6`：remote move 的 old/new parent 任一被 materialized/visited 时，working set 能交付所需变化；移出未跟踪区域不被伪造成错误远端删除。
 
-### 5.2 FP-002：不可变 Change Delivery Session 与幂等 Continuation
+### 5.2 FP-002：Immutable Journal 与 Sequence Anchor 重放
 
 #### 需求目标
 
-- 一个已提交 journal range 只派生一次，后续 batch 不访问远端且能确定性重放。
-- Enumerator 被系统销毁、Extension 重启或 App 退出时，continuation 仍可恢复。
+- provider-visible change 在 journal commit 时固化 payload，后续 batch 不访问远端或 live row。
+- Enumerator 被系统销毁、Extension 重启或 App 退出时，sequence anchor 仍可恢复。
 - update/delete 共用同一个 batch budget，并按父目录先于子项交付。
 - 变化交付采用 at-least-once：不得遗漏，重复 batch 必须幂等，不能要求系统提供 exactly-once acknowledgement。
 
@@ -395,19 +393,13 @@ trash            -> TrashEnumerator
 
 Event/reconciliation producer 先完成 metadata enrichment，再在事务中写入 item、journal 和 signal outbox。完整目录扫描只有在 complete 后才提交 tombstone；尚未解析的远端 hint 不占用 provider journal sequence。
 
-首次收到正常 anchor 时：
+收到 anchor 时：
 
 1. 校验 anchor。
-2. 从 `(incomingSequence, currentCommittedSequence]` 的本地 journal 生成完整、有序 change list，不执行远端访问。
-3. 在一个 SQLite 事务中写入不可变 `fp_change_delivery_sessions` 和 `fp_change_delivery_items`。
-4. 取出一个 batch，返回 opaque continuation anchor。
-
-continuation anchor 只包含格式版本、随机 session ID、delivery offset 和 integrity tag，不携带敏感路径。收到 continuation 时：
-
-1. 按 session ID 和 offset 查询 immutable payload；
-2. 相同 continuation 必须返回字节语义一致的 update/delete batch 和 next/final anchor；
-3. session 不存在、TTL 已过或 integrity 校验失败时返回 `syncAnchorExpired`，禁止默默从 live row 重建；
-4. 读取 batch 不推进可变 cursor、不删除已经返回的 item；系统从 final 或更晚普通 anchor 请求后，旧 session 才进入 TTL compaction。
+2. 从 `incomingSequence` 后按全局 sequence 扫描有界 journal window，不执行远端访问。
+3. 按 working set、普通目录或 trash 的 membership predicate 过滤；达到 relevant item budget 时停止，不能越过未交付的 relevant row。
+4. 从 immutable payload 构造 update/delete；返回最后已扫描 sequence 编码的 next anchor，并根据 journal 是否还有后续 row 设置 `moreComing`。
+5. 扫描段均被过滤时仍推进到最后已扫描 sequence，避免无关 container change 阻塞该 Enumerator。
 
 排序规则：
 
@@ -416,24 +408,25 @@ continuation anchor 只包含格式版本、随机 session ID、delivery offset 
 删除：在更新之后，按深度降序或服务端提供的安全顺序
 ```
 
-删除 item 的 live row 不应在形成可恢复 delivery payload 前移除。系统若在 `didUpdate/didDelete` 后、`finishEnumeratingChanges` 前重启，允许重放相同 batch；item version、stable identity 和删除幂等保证重放无副作用。
+删除 item 的 live row 不应在 immutable tombstone payload 和 journal row 提交前移除。系统若在 `didUpdate/didDelete` 后、`finishEnumeratingChanges` 前重启，允许从旧 anchor 重放相同 delta；item version、stable identity 和删除幂等保证重放无副作用。
 
 #### 实施步骤
 
-1. 扩展 SQLite schema 和 StoreBridge API，增加 immutable session/item create、read batch、resume、observe-final、TTL compact。
-2. 把 `enumerateChanges` 改为纯本地 `ChangeDeliveryCoordinator`，不再读取远端或把当前 live item row 作为唯一交付 payload。
-3. 为 working set、普通目录和 trash 分别定义 change derivation，但共用 delivery store。
-4. incomplete reconciliation 保留 producer job/cursor，不提交不可靠 tombstone；完成后再分配 journal sequence 并 signal。
-5. 对每次 batch 记录 correlation ID、session ID、offset 和 moreComing，不记录远端敏感路径。
+1. 扩展 `change_journal` schema 和 StoreBridge API，加入 immutable item/tombstone payload、bounded scan 和 retention-aware compaction。
+2. 把 `enumerateChanges` 改为纯本地 `JournalChangeDeliveryCoordinator`，不再读取远端或从当前 live item row 重建历史 payload。
+3. 为 working set、普通目录和 trash 分别定义 scope filter，共用 sequence anchor 和 journal scan。
+4. producer 在写 journal 前完成同一结果内的折叠和父子排序；incomplete reconciliation 保留 job/cursor，不提交不可靠 tombstone，独立完整分支可先提交并 signal。
+5. 对每次 batch 记录 correlation ID、incoming/next sequence、扫描数量、交付数量和 `moreComing`，不记录远端敏感路径。
 
 #### 验收标准
 
-- `AC-FP-002-1`：在 batch 1 返回后强杀 Extension，使用 continuation anchor 创建新 Enumerator，剩余变化全部交付；重复请求同一 anchor 返回相同 batch。
-- `AC-FP-002-2`：update/delete 共用 `max(1, min(validSuggestedBatchSize ?? 200, 4000))` budget；系统提供较小正数时不人为扩大。
+- `AC-FP-002-1`：在 batch 返回后强杀 Extension，使用 next sequence anchor 创建新 Enumerator，剩余变化全部交付；使用旧 anchor 重试时返回相同 journal payload 和顺序。
+- `AC-FP-002-2`：`suggestedBatchSize` 只决定本次 relevant item budget，并受实现上限约束；update/delete 共用该 budget，batch boundary 变化不造成遗漏或越过未交付 row。
 - `AC-FP-002-3`：父目录重命名和子文件变化按父先子后交付，Finder 不出现临时双路径。
 - `AC-FP-002-4`：一个 reconciliation 分支失败时，不提交该分支的推测性删除；其他已完整提交的 journal change 可正常交付。
-- `AC-FP-002-5`：session 重复 resume、旧 cursor 重放、未知 session、过期 session 都有明确、可测试的结果。
+- `AC-FP-002-5`：旧 anchor 重放、跨 container anchor、低于 journal minimum sequence 和 compaction 后过期都有明确、可测试的结果。
 - `AC-FP-002-6`：在 `didUpdate/didDelete` 与 `finishEnumeratingChanges` 之间强杀 Extension，系统从旧 anchor 重试时不遗漏变化，重复交付不产生远端或本地副作用。
+- `AC-FP-002-7`：create/modify/move/delete 的组合按固定折叠表产生最终 delta；cycle、缺失父链或不可解释序列只隔离对应依赖分支，不阻塞其他完整分支。
 
 ### 5.3 FP-003：Sync Anchor 版本、Epoch 和过期映射
 
@@ -454,10 +447,10 @@ containerScope
 epoch
 sequence
 projectionSchemaRevision
-integrityTag
+checksum
 ```
 
-实际编码必须小于 500 字节，并使用定长字段。`integrityTag` 使用每个 Domain 随机生成、保存在 App Group Store 的 integrity key 计算，用于发现损坏和非预期篡改，不作为跨本机安全边界。`epoch` 只在现有 journal 无法继续解释时递增：
+实际编码必须小于 500 字节，并使用定长字段。`checksum` 覆盖 format/domain/container/epoch/sequence/projection schema，用于发现随机损坏；它不构成对抗可修改 App Group 数据的本地进程的安全边界，也不引入独立 key rotation。`epoch` 只在现有 journal 无法继续解释时递增：
 
 - Store schema/generation 发生不兼容迁移，旧 journal/anchor 无法继续解释；
 - root remote ID 或 scope 变化；
@@ -471,9 +464,11 @@ integrityTag
 | 情况 | File Provider 结果 |
 |---|---|
 | anchor format/domain/scope/epoch 不匹配 | `.syncAnchorExpired` |
-| projection schema/integrity tag 不匹配 | `.syncAnchorExpired` |
+| projection schema/checksum 不匹配 | `.syncAnchorExpired` |
 | sequence 小于 journal 最小有效序号 | `.syncAnchorExpired` |
-| page token generation 不匹配 | 终止该次 item enumeration 并要求从 initial page 重试 |
+| page token format/domain/container/checksum 不匹配 | `.cannotSynchronize`，启动 fresh hydration 并从 initial page 重试 |
+| page token 指向非 current 但仍在 TTL 内的 complete snapshot | 继续从该 snapshot 分页 |
+| page token 指向已回收 snapshot | `.cannotSynchronize`，不得转成 change-anchor expired |
 | DB migration/process generation fence | 暂时 `.cannotSynchronize`，等待新 Extension 实例或迁移完成 |
 | SQLite 损坏、锁超时、真实网络错误 | `.cannotSynchronize` / 对应可重试错误 |
 
@@ -483,16 +478,17 @@ integrityTag
 
 1. 增加 anchor v2 codec、解析、域/容器/epoch/schema 校验。
 2. 修改 `FileProviderErrorMapper`，为 anchor/projection/epoch 过期提供专用映射，同时保留 DB fence 的暂时不可同步语义。
-3. 增加 projection schema revision、严格 range 校验和 integrity tag；规则/capability 优先用 journal 增量表达。
-4. 为 journal compaction 和 migration 增加 epoch bump 事务。
-5. 在 `Enumerator` 和 `ChangeDeliveryCoordinator` 中统一先处理 continuation，再处理正常 anchor。
+3. 增加 projection schema revision、严格 range 校验和 checksum；规则/capability 优先用 journal 增量表达。
+4. 实现 4.2 的 v6→v7 原子 migration、epoch/sequence reset、旧进程 generation fence 和 fresh-enumeration signal。
+5. 在所有 Enumerator 中统一使用 sequence anchor codec、bounded journal scan 和 scope filter。
 
 #### 验收标准
 
 - `AC-FP-003-1`：旧版本 anchor 不会返回空 update/delete，而是触发 fresh enumeration。
 - `AC-FP-003-2`：改变 anchor/projection schema、epoch 或 compact boundary 后，旧 anchor 返回 `.syncAnchorExpired`；普通 capability/规则变化可用 journal 表达时不触发全量过期。
-- `AC-FP-003-3`：随机篡改 anchor、跨 Domain anchor、跨 container anchor 均 fail closed。
+- `AC-FP-003-3`：随机损坏、checksum 不匹配、跨 Domain anchor、跨 container anchor 均 fail closed。
 - `AC-FP-003-4`：编码后的 anchor/page token 小于系统上限，且不含敏感字符串。
+- `AC-FP-003-5`：v6→v7 任一事务步骤前后终止只留下完整 v6 或完整 v7；完整 v7 必有新 epoch、确定 sequence boundary、`reconcile_status=required` 和 pending fresh-enumeration signal，旧进程不能继续写入。
 
 ### 5.4 FP-004：Materialized、Evicted 和 Pending 系统集合
 
@@ -504,7 +500,7 @@ integrityTag
 
 #### 方案详情
 
-macOS 13+ 可使用 File Provider materialized/pending set API。实现两个独立协调器：
+macOS 13+ 可使用 File Provider materialized/pending set API。由一个 `SystemSetCoordinator` 管理两类独立 observer 和 generation：
 
 ```text
 materializedItemsDidChange
@@ -518,10 +514,10 @@ pendingItemsDidChange
   -> persist pending state/error/maximum-size flag
 ```
 
-系统回调只设置持久 refresh intent 并尽快 completion；`SystemSetCoordinator` 以有界 worker 消费 intent。materialized observer 必须：
+系统回调先持久化 refresh intent，再在 callback 的数秒预算内由 `SystemSetCoordinator` 推进一个有界批次；完成 generation 或保存 continuation/retry 状态后才调用 completion。主应用订阅 materialized/pending set notification，Extension 初始化和后续 callback 也会继续 drain 未完成 intent，正确性不依赖 callback 返回后的游离任务。materialized observer 必须：
 
 1. 使用系统指定的空 starting page；
-2. 主动遍历所有返回 page，把结果写入新的 staging generation，并保存 next page/cursor；
+2. 按 callback 预算遍历有界 page，把结果写入新的 staging generation，并保存 next page/cursor；
 3. 只有完整成功结束后才原子发布 generation，并与上一完整 generation 做差；
 4. 错误、中断、空的部分 page 或数据库繁忙不改变上一代 materialized 事实；
 5. 文件的 materialized 状态与 directory 的 visited subscription 分开；directory 变为 dataless 时不自动清除 visited；
@@ -532,10 +528,10 @@ pending set 是有延迟、可能 capped 的 UI/状态投影，不是实时变�
 #### 实施步骤
 
 1. 将当前 `materialized_containers` 更名或扩展为可表达文件/目录、visited subscription、generation 和状态来源的 Store API；保留兼容迁移。
-2. 实现 `MaterializedSetObserver` 和 `PendingSetObserver`，保存 staging generation、cursor、domainVersion、capped/maximum-size 信息。
+2. 实现 `MaterializedSetObserver` 和 `PendingSetObserver`，保存 staging generation、cursor、domainVersion、capped/maximum-size 信息，并由 Domain/set-kind advisory lock 与 claimed-generation fencing 保护。
 3. 改造 `materializedItemsDidChange`、`pendingItemsDidChange`、`importDidFinish`。
 4. fetch success 只作为一个 materialization hint，最终状态以系统集合回调校正。
-5. 对系统回调被中断、重复、返回空集合和数据库繁忙增加恢复测试。
+5. 对系统回调被中断、completion 前终止、重复、返回空集合和数据库繁忙增加恢复测试。
 
 #### 验收标准
 
@@ -545,8 +541,9 @@ pending set 是有延迟、可能 capped 的 UI/状态投影，不是实时变�
 - `AC-FP-004-4`：materialized callback 中途终止后，下次回调可重放，不把未知状态标为 clean。
 - `AC-FP-004-5`：根目录或文件夹的“移除下载”可根据实际可 eviction descendant 刷新，而不依赖固定缓存。
 - `AC-FP-004-6`：pending set capped 或部分枚举失败时，缺席 item 不会被错误清除 pending/error；完整未 capped generation 才允许收敛 membership。
+- `AC-FP-004-7`：App 与 Extension 同时领取、owner 中途终止和 stale worker 恢复时，最多一个 claimed generation 能推进并发布；旧 generation 写入返回 fenced，`refresh_required` 不被误清除。
 
-### 5.5 FP-005：Item 状态、Capability、Content Policy 与特殊文件保真
+### 5.5 FP-005：Item 状态、Capability、Content Policy 与特殊文件边界
 
 #### 需求目标
 
@@ -565,7 +562,7 @@ pending set 是有延迟、可能 capped 的 UI/状态投影，不是实时变�
 | `isDownloading`/`downloadingError` | pending/download status |
 | `isDownloaded` | materialized set observer 的结果 |
 | `childItemCount` | complete directory snapshot 的 direct child count；未知或 snapshot incomplete 时返回 nil |
-| `fileSystemFlags` | POSIX user read/write/execute、hidden 和 path-extension-hidden；lock/unsupported 不伪装成 filesystem flag |
+| `fileSystemFlags` | 仅投影可从远端事实安全派生的 hidden/path-extension-hidden；POSIX mode、lock 和 unsupported metadata 不伪装成 filesystem flag |
 | `capabilities` | Cloudreve permission + verified capability + lock/trash 状态 |
 | `userInfo` | 非敏感 action predicate、conflict、upload/download 状态 |
 | `decorations` | conflict/error/keep-downloaded 等持久状态 |
@@ -579,17 +576,17 @@ Content policy：
 
 远端 upsert 时必须保留 materialized、pending、keep-downloaded、visited、lock token、exclusion 和 conflict 状态。
 
-特殊文件采用显式保真矩阵，任何后端无法表达的语义都不能静默丢弃：
+特殊文件采用固定的 1.0 兼容策略，任何无法表达的语义都不能静默丢弃：
 
 | 本地类型/metadata | 目标策略 |
 |---|---|
 | 普通文件、普通目录 | 正常同步 |
-| symlink | 仅在 Cloudreve/Provider 往返保真验证后开放；否则 `.excludedFromSync` 并保留本地内容 |
-| resource fork、syncable xattr | 后端支持且 round-trip 通过后同步；否则在 create/modify 前拒绝或排除 |
-| executable/hidden/extension-hidden | 使用 `fileSystemFlags` 投影；远端不支持时明确为 local-only 或 unsupported |
-| hardlink | 明确转换为独立副本或排除，不宣称保留 inode/link 语义 |
+| symlink、远端 link/shared redirect | 1.0 不跟随、不进入普通可写树；本地 symlink 返回 `.excludedFromSync` 并保留本地内容 |
+| resource fork、xattr、Finder tag/comment、POSIX ACL | 1.0 不同步；检测到非空 resource fork 或仅 resource fork 变化时返回稳定 unsupported/cannot-synchronize，不能只上传 data fork 后报告成功 |
+| executable/hidden/extension-hidden | 仅投影可从远端事实安全派生的显示状态；本地不支持字段按 File Provider 协议保留为 pending/unsupported，不写回默认值 |
+| hardlink | 作为独立文件内容同步，不保留 inode/link 关系 |
 | socket、device、FIFO 等 | `.excludedFromSync`，不得读取为普通文件上传 |
-| package/bundle directory | 按产品合同选择目录语义或原子文档语义，并加入并发修改测试 |
+| package/bundle directory | 1.0 按普通目录逐子项同步，不承诺包级原子性；加入应用安全保存与并发修改测试 |
 
 `metadataVersion` 使用定长 hash，输入为 remote metadata version、`projectionSchemaRevision` 和会改变系统可见 metadata 的本地 projection boundary；不得直接拼接无界版本字符串。
 
@@ -599,7 +596,7 @@ Content policy：
 2. 在 StoreBridge 增加统一 `itemProjection(identifier:)`，由所有 callback 和 action 使用。
 3. 实现 permission/capability/lock/trash 到 `NSFileProviderItemCapabilities` 的矩阵测试。
 4. 增加 `fileSystemFlags`、child count、error object 和最小 `userInfo`。
-5. 实现特殊文件/metadata capability matrix、拒绝/排除策略和往返保真测试。
+5. 实现固定的 1.0 特殊文件拒绝/排除策略和兼容性测试；未来能力不进入当前通用 capability framework。
 6. 将 item metadata version 与 projection schema、materialization/action boundary 结合。
 
 #### 验收标准
@@ -609,7 +606,7 @@ Content policy：
 - `AC-FP-005-3`：目录 child count 在已知时准确，未知时不返回错误的 0。
 - `AC-FP-005-4`：远端 metadata refresh 不会清除本地 pin/materialized/conflict 状态。
 - `AC-FP-005-5`：新增 item 属性时旧 Extension 缓存可通过 FP-012 刷新，不强制重新下载内容。
-- `AC-FP-005-6`：symlink、resource fork、xattr、hardlink、package 和 unsupported node 均按能力矩阵处理；未验证类型不会被静默上传为丢失语义的普通文件。
+- `AC-FP-005-6`：symlink、resource fork、xattr、hardlink、package 和 unsupported node 均按固定 1.0 策略处理；不支持的类型或 metadata 不会被静默上传为丢失语义的普通文件。
 
 ### 5.6 FP-006：异步传输、Progress、Task Registration 和取消
 
@@ -645,6 +642,8 @@ File Provider callback
 6. upload 使用 chunk/part checkpoint；每个 part 完成后持久化 hash、etag、offset 和 state。
 7. callback 结束后不保留依赖临时 URL 的 detached task；source URL 必须在 callback 生命周期内打开为受控 handle，不持久化系统临时路径。
 
+v1 的 content-bearing create/modify 在远端 commit 或明确失败前不调用 completion。Extension 在上传中终止时，已完成 part 和远端 session 保留，operation 进入 `awaiting_source_replay`；系统重放 create/modify 并再次提供 contents URL 后，先重新计算 size/edge hash/base version/source generation，完全匹配才从未完成 part 继续。没有有效 source replay 时不得仅凭 upload checkpoint 继续，也不得把 operation 标记成功。completion 后后台上传不属于 v1；未来引入时必须先定义独立、持久且用户可恢复的 source ownership、配额、权限和清理合同，不能继续依赖系统临时 URL。
+
 #### 实施步骤
 
 1. 新增 async backend protocol，生产 `NimbusSyncRemoteBackend` 适配 Cloudreve URLSession。
@@ -652,15 +651,17 @@ File Provider callback
 3. 实现 async `URLSessionTaskRegistrar`，覆盖 suspended/register/resume、注册失败和单 item 单 task 约束。
 4. 增加 cancellation checkpoints：before request、after response、per chunk、before commit。
 5. 迁移同步 facade 仅用于 unit-test double；禁止生产 callback 调用同步等待路径。
-6. 将进度投影到 `pending_items`/`tasks`，错误通过 item projection 读取。
+6. 实现 `awaiting_source_replay` 状态、source fingerprint 复核、远端 session 过期重建和 orphan part 清理。
+7. 将进度投影到 `pending_items`/`tasks`，错误通过 item projection 读取。
 
 #### 验收标准
 
 - `AC-FP-006-1`：取消下载/上传会取消底层 task，completion 只调用一次，Store 不产生假成功。
 - `AC-FP-006-2`：对大于内存数倍的文件进行下载，内存增长与文件大小无关，临时文件在成功/失败路径都清理。
-- `AC-FP-006-3`：File Provider manager 能看到 item 关联 task；Extension 终止后 operation/checkpoint 可恢复。
+- `AC-FP-006-3`：File Provider manager 能看到 item 关联 task；Extension 终止后 operation/checkpoint 保留，并在系统重放相同 source 后恢复；没有 source replay 时保持 `awaiting_source_replay`，不后台盲传。
 - `AC-FP-006-4`：网络超时、认证过期、signed URL 404、大小不匹配分别映射为可诊断的错误，不进入无限重试。
 - `AC-FP-006-5`：注册失败时 task 未 resume；并发 part 不会为同一 item 注册多个活动 task。
+- `AC-FP-006-6`：重放 source 的 fingerprint 或 generation 不匹配时废弃旧 remote session 或等待用户处理，不把旧 part 拼接进新内容。
 
 ### 5.7 FP-007：Cloudreve 条件写与 macOS 原生冲突
 
@@ -689,30 +690,47 @@ backend 根据 Cloudreve 合同发送 `previous` 或等价条件参数。不能�
 | 系统/能力 | 行为 |
 |---|---|
 | macOS 26+ 且 `failOnConflict` | 条件写失败时返回 `.localVersionConflictingWithServer`，让系统保留 conflict copy |
-| macOS 13–25 | 持久化 conflict projection，重新 signal working set，返回可重试/需处理错误 |
+| macOS 13–25 | 持久化 conflict projection；本地内容由系统 pending item 保留，或在用户确认后导出到可见位置；无法证明可恢复时阻断覆盖/keep-both |
 | Cloudreve conditional modify 未验证 | 只禁止可能覆盖既有内容的 modify/upload；其他 mutation 由各自独立 capability 决定 |
 | 结果未知 | 不自动重放可能造成重复写的请求，进入 unknown outcome/reconciliation |
 
 当实现支持原生冲突时，Extension Info.plist 增加 `NSExtensionFileProviderSupportsFailingUploadOnConflict=true`；代码使用 `#available(macOS 26.0, *)`，不能因最低部署 macOS 13 而静态调用新 API。
 
-macOS 13–25 的 Conflict Center 不能只保存摘要或系统 source URL。检测到冲突后，在返回 callback 前把 local candidate 以流式方式复制到 App Group 的受控 recovery storage，记录 conflict ID、item UUID、base/remote version、内容 hash、大小、恢复文件引用和 retention state；文件内容不写入 SQLite。recovery storage 使用配额、文件权限、启动期 orphan cleanup 和“resolution commit 后再删除”规则。若 recovery copy 失败或空间不足，返回明确错误并保留系统 dirty data，不能创建一个无法执行 keep local/keep both 的空 conflict record。macOS 26 原生 conflict copy 经实机证明由系统可靠保留后，可以只保存引用状态而不重复复制内容。
+macOS 13–25 的 Conflict Center 使用以下版本化 source contract，不把唯一 local candidate 复制到 App Group 内部缓存：
+
+```text
+ConflictLocalSource
+  systemPending(itemID, sourceGeneration, expectedBaseVersion, expectedHash, expectedSize)
+  userExport(sourceGeneration, expectedHash, expectedSize)
+  unavailable
+```
+
+`conflicts` 扩展 `local_source_kind`、`expected_base_version`、`expected_source_hash`、`expected_source_size`、`resolution_intent` 和 `resolution_state`；source kind 与校验字段和 conflict projection 在同一事务写入。表中不保存 callback URL、用户导出路径、bookmark 或文件内容。
+
+默认流程为：Conflict Center 先持久化 `overwrite_remote_pending` 或 `keep_both_pending` resolution intent，再调用 `NSFileProviderManager.requestModification(of: [.contents], forItemWithIdentifier:)` 请求系统重新调度 `modifyItem`。Extension 收到新的 contents URL 后，必须按 conflict ID、item ID、source generation、base/remote version、size 和完整内容 hash 匹配 `systemPending` source；全部匹配才执行条件 overwrite 或 collision-safe create，完成后原子提交 operation/conflict 终态。请求被取消、系统没有重新提供 contents 或任一字段不匹配时保持 conflict pending，不读取旧 callback URL，也不执行远端写入。
+
+signed Finder 验证确认某个 macOS 13–25 版本无法可靠重放 contents 时，主应用通过 `NSFileProviderManager.getUserVisibleURL(for:)` 获取系统 URL，使用 `NSFileCoordinator` 受协调读取，并通过 `NSSavePanel` 导出到用户选择的可见位置。数据库只保存 source generation、hash、size 和“已导出”证明，不保存原始路径或 security-scoped bookmark。执行 overwrite/keep-both 时由用户通过 `NSOpenPanel` 重新选择导出文件，在当前用户动作内获取访问权限并重新校验 hash/size；校验通过后流式交给 operation，取消或不匹配继续保留冲突。
+
+`FileProviderUI` 只把 opaque conflict/item ID 路由到主应用，不读取 source 或执行 mutation。`systemPending` 重放和 `userExport` 都不可用时，Conflict Center 只允许 keep remote 或继续保留冲突，并隐藏 overwrite/keep-both。macOS 26 原生 conflict copy 经 signed Finder 证明可靠后，只保存系统引用状态。
 
 #### 实施步骤
 
 1. 在 Cloudreve contract 环境分别验证 `previous` 对 create collision、modify、zero-byte、分片完成的原子语义。
 2. 扩展 per-operation capability matrix，区分 collision-safe create、conditional modify、metadata move、trash、purge、zero-byte、resumable、native conflict copy 和 fallback conflict。
 3. 在 modify operation 中保存 baseVersion、条件参数和后置验证结果。
-4. 实现旧系统 conflict recovery storage、配额、orphan cleanup 和 resolution 生命周期。
+4. 实现 `ConflictLocalSource`、resolution intent、`requestModification(.contents)` 重放、source generation/hash 校验和 completion 单次提交。
 5. 增加 macOS 26 分支和旧系统 fallback；更新 Info.plist/action 状态。
-6. 对 412/版本冲突、recovery disk full、响应丢失、重复 callback 和 conflict resolution 做故障注入。
+6. 实现主应用的受协调读取、`NSSavePanel` 导出和 `NSOpenPanel` 重新选择 fallback；App Group 只保存非内容证明。
+7. 对 412/版本冲突、pending source 不可用、source generation/hash 不匹配、用户取消/导出失败、响应丢失、重复 callback 和 conflict resolution 做故障注入。
 
 #### 验收标准
 
 - `AC-FP-007-1`：两个客户端基于同一版本编辑同一文件，后提交者不会静默覆盖先提交者。
 - `AC-FP-007-2`：macOS 26+ 的 `failOnConflict` 返回专用冲突错误并保留两份内容。
-- `AC-FP-007-3`：旧系统冲突可在 Conflict Center 中看到 base/remote/local 摘要并执行 keep remote/overwrite/keep both。
+- `AC-FP-007-3`：旧系统冲突可在 Conflict Center 中看到 base/remote/local 摘要；只有 `requestModification(.contents)` 重放通过完整 source 校验，或用户重新选择的导出文件通过 hash/size 校验时才允许 overwrite/keep both。
 - `AC-FP-007-4`：未验证 conditional modify 时只阻止可能覆盖既有内容的路径，不降级为无条件 PUT，也不无差别关闭已经独立验证的安全操作。
-- `AC-FP-007-5`：macOS 13–25 冲突在 Extension 重启、App 退出和 source callback URL 失效后仍可执行 keep local/keep both；resolution 前不会清理 recovery content。
+- `AC-FP-007-5`：macOS 13–25 冲突在 Extension 重启、App 退出和旧 callback URL 失效后，不会依赖旧 URL；缺少可恢复 local content 时隐藏并阻断 overwrite/keep both。
+- `AC-FP-007-6`：系统重放和用户导出路径均覆盖取消、重启、source generation/hash/size 不匹配与重复提交；失败不产生远端副作用，数据库和日志不保存导出路径或文件内容。
 
 ### 5.8 FP-008：父目录恢复、目录移动和父子顺序
 
@@ -736,7 +754,7 @@ macOS 13–25 的 Conflict Center 不能只保存摘要或系统 source URL。�
 
 - 在一个 move generation 中写入父目录的新 parent/name/URI、old/new parent journal 和 descendant refresh job；
 - 对已知 descendants 以稳定 remote ID 更新当前 URI；数量过大时使用可恢复 cursor 分批更新，并在完成前保留 generation/旧 URI alias 供事件解析；
-- change delivery 按父深度先交付；
+- journal sequence 按父深度先交付；
 - 新 parent 未 materialized 时，不必把 item 伪装成删除，等待系统处理未知 parent；
 - parent 404 时只标记删除候选，完整 reconciliation 后才允许提交 tombstone。
 
@@ -786,18 +804,18 @@ else
 
 `supportsSyncingTrash` 视为 Domain 注册合同，而不是普通运行时开关。同一 identifier 再次 `addDomain` 不能被假定会更新该属性。能力在 Domain 已注册后发生变化时：
 
-1. 默认保持注册时能力，产品显示“重新连接后生效”；
-2. 只有 `waitForChanges`、pending/dirty 检查和 `.preserveDirtyUserData` 路径通过后，才允许用户确认受控 reprovision；
-3. reprovision 失败时恢复原 Domain record、Keychain reference 和 preserved dirty location，不自动清理数据。
+1. 现有 Domain 保持注册时能力，不自动 remove/re-add；
+2. 产品显示“移除并重新添加云盘后生效”，由用户显式发起现有 Domain removal/provisioning 流程；
+3. removal 继续执行 `waitForChanges`、pending/dirty 检查和 preserve-dirty-data 保护；条件不满足时阻止移除并保留 Domain record、Keychain reference 和 dirty data。
 
 #### 实施步骤
 
 1. 定义 Cloudreve trash list/restore/purge contract test；未通过前 capability 保持 unsupported。
 2. 修改 provisioning 顺序：先完成 capability snapshot，再调用 `makeSystemDomain` 和首次 `addDomain`。
 3. 实现 `TrashEnumerator`、trash item projection 和 restore/purge operation。
-4. 实现已注册 Domain 的 trash capability 变更提示与受控 reprovision，不使用重复 `addDomain` 冒充配置更新。
+4. 已注册 Domain 的 capability 变化只更新产品提示，不调用重复 `addDomain`，不自动 reprovision。
 5. 将 trash 404、路径重命名、重复 purge、网络重试加入 operation replay 测试。
-6. 在 signed Finder 验证 Trash、Restore、Empty Trash、reprovision 和 Domain removal 交互。
+6. 在 signed Finder 验证 Trash、Restore、Empty Trash 和用户显式 remove/re-add 交互。
 
 #### 验收标准
 
@@ -805,7 +823,7 @@ else
 - `AC-FP-009-2`：已验证环境中 Finder trash 与 Cloudreve trash 列表一致，restore 保留 stable item identity。
 - `AC-FP-009-3`：重复 purge 或远端已不存在返回幂等成功，不产生无限重试。
 - `AC-FP-009-4`：Domain 移除、trash purge 和 dirty upload 竞争时不丢本地未确认内容。
-- `AC-FP-009-5`：已有 Domain 的 trash capability 变化不会通过重复 `addDomain` 静默假成功；受控 reprovision 可恢复或保留 dirty data。
+- `AC-FP-009-5`：已有 Domain 的 trash capability 变化不会触发重复 `addDomain` 或自动 reprovision；用户显式 remove/re-add 前必须通过 dirty-data 保护门禁。
 
 ### 5.10 FP-010：排除规则与 `.excludedFromSync` 安全接线
 
@@ -966,75 +984,86 @@ materialization/action boundary
 
 ## 6. 实施步骤与依赖
 
+实施依赖与退出门禁如下；“退出门禁”必须在进入依赖该 Phase 的集成路径前通过，可并行项只能在接口和 schema contract 已冻结后并行：
+
+| Phase | 前置依赖 | 可并行项 | 退出门禁 |
+|---|---|---|---|
+| A | 当前 schema v6、既有 operation/auth/scope 合同 | async backend protocol 与 mock | v6→v7 kill-point migration、Swift/Rust schema parity、anchor/page codec、journal/system-set transaction tests |
+| B | A 的 v7 schema、journal payload 和 anchor codec | D 的 transport adapter、C 的 projection model | `AC-FP-001` 至 `AC-FP-003` 单元/故障测试，普通目录与 working set 基础 signed smoke |
+| C | A 的 system-set schema、B 的 membership predicate | D 的 Cloudreve contract tests | `AC-FP-004`、`AC-FP-005`，App/Extension 双 worker、kill/reclaim、capped/partial system-set tests |
+| D | A 的 operation/local-state contract；B 的 journal commit API | C 的 item projection、E 的无副作用 UI router | `AC-FP-006`、`AC-FP-007`，Cloudreve operation matrix 和 conflict source replay/export tests |
+| E | B 的 Enumerator、C 的 projection、D 的 mutation/capability | Finder action UI 与排除规则单元测试 | `AC-FP-008` 至 `AC-FP-011`，dirty-data、删除隔离和 signed Finder action tests |
+| F | A 至 E 全部退出门禁 | 无 | `AC-FP-012`、全量 signed/contract/性能/安全/72 小时证据，无未解释 blocker |
+
 ### 6.1 Phase A：Store、版本和接口基础
 
 目标：先建立所有后续步骤依赖的持久事实和协议边界。
 
-1. 扩展 schema generation，加入 immutable delivery、directory snapshot staging、system-set generation、projection refresh job 和必要索引。
-2. 实现 StoreBridge 的 transaction、epoch、anchor/page v2、integrity tag、immutable delivery 和 local item state API。
+1. 由 Swift `SQLiteStateStore` 作为唯一生产 migration owner 扩展 schema generation，为现有 `change_journal` 加入 immutable item/tombstone payload，并加入 directory snapshot staging、现有 system-set 表的 generation 字段、轻量 pending observation 和 projection refresh job；Rust 同步 schema manifest 但不迁移生产库。
+2. 实现 StoreBridge 的 transaction、epoch、anchor/page v2、checksum、bounded journal replay 和 local item state API。
 3. 增加 `CloudreveAsyncBackend`、async `URLSessionTaskRegistrar`、`Progress`/Swift Task cancellation contract。
-4. 扩展 per-operation capability snapshot，明确 collision-safe create、conditional modify、metadata move、trash/purge、zero-byte、resumable、special metadata 和 action capability。
+4. 扩展 per-operation capability snapshot，明确 collision-safe create、conditional modify、metadata move、trash/purge、zero-byte、resumable 和 action capability；特殊文件使用固定 1.0 策略。
 5. 建立错误分类：`syncAnchorExpired`、retryable network、auth expired、version conflict、unknown outcome、unsupported。
 
-输出：schema migration、协议类型、错误映射、Store unit tests。
+输出：v7 schema migration、Swift/Rust schema manifest/parity test、协议类型、错误映射、Store unit tests。
 
-进入条件：SQLite migration/rollback、anchor/page encode/decode/integrity、immutable delivery replay 和 staging-generation transaction tests 通过。
+退出门禁：v6→v7 每个事务步骤前后强杀均只得到完整 v6 或完整 v7；新 epoch/sequence/reconcile/signal 终态一致；anchor/page encode/decode/checksum、bounded journal/折叠规则重放、system-set fencing 和 generation-publish transaction tests 通过。
 
-### 6.2 Phase B：Enumerator 和 Change Delivery
+### 6.2 Phase B：Enumerator 和 Journal Delivery
 
 目标：先修复系统枚举和变化交付，再接入更多 Finder action。
 
-1. 拆分 WorkingSet/Directory/Trash enumerator。
+1. 拆分 WorkingSet/Directory/Trash enumerator；working set item enumeration 使用 revision-bound keyset cursor。
 2. 为目录 snapshot 增加 server snapshot token 或本地 staging membership、generation、TTL 和容量门禁。
-3. 将 event/reconciliation producer 与纯本地 change delivery consumer 分离；producer 完成后原子提交 journal/outbox。
-4. 处理父先子后、删除顺序、immutable continuation、旧 cursor 重放和 session TTL compaction。
+3. 将 event/reconciliation producer 与纯本地 journal consumer 分离；producer 完成后原子提交 immutable payload、journal 和 outbox。
+4. 处理 producer-side journal fold、父先子后、删除顺序、bounded sequence scan、旧 anchor 重放和 retention-aware compaction。
 5. 将 anchor validation failure 映射为 anchor expired；DB migration/process fence 保持暂时 cannot synchronize，并加入 process kill fault injection。
 
-输出：三类 Enumerator、change delivery buffer、anchor v2、observer mocks。
+输出：三类 Enumerator、`JournalChangeDeliveryCoordinator`、anchor v2、observer mocks。
 
-进入条件：`AC-FP-001` 至 `AC-FP-003` 的 unit/故障测试通过。
+退出门禁：`AC-FP-001` 至 `AC-FP-003` 的 unit/故障测试和基础 signed Finder smoke 通过。
 
 ### 6.3 Phase C：Materialized、Pending 和 Item Projection
 
 目标：让系统实际状态成为 Finder item 的可靠输入。
 
-1. 实现 materialized/pending enumerator observer 和 system-set staging generation。
+1. 扩展现有 system-set/materialized 表并实现 materialized/pending observer generation、POSIX advisory lock 和 claimed-generation fencing；不新增通用 scan/items/heads 三层状态。
 2. materialized 仅在完整成功时原子发布差集；pending 成功但 capped 时只发布可见子集/capped 标志且不按缺席清理，失败时保持上一代。
-3. 完整化 item capability、status、error、child count、fileSystemFlags、contentPolicy、userInfo、decorations 和特殊文件保真矩阵。
+3. 完整化 item capability、status、error、child count、fileSystemFlags、contentPolicy、userInfo、decorations 和固定 1.0 特殊文件策略。
 4. 实现 action state projection 和祖先 refresh。
-5. 加入 system collection interruption/replay 测试。
+5. 加入 App/Extension 双 worker、锁竞争、owner 强杀、旧 owner 恢复、system collection interruption/replay 测试。
 
 输出：`SystemSetCoordinator`、materialized/pending observers、Item projection、property tests。
 
-进入条件：`AC-FP-004`、`AC-FP-005` 通过，且不存在把 unknown 状态默认映射为 downloaded/healthy 的路径。
+退出门禁：`AC-FP-004`、`AC-FP-005` 通过，跨进程竞态不能发布错误 generation，且不存在把 unknown 状态默认映射为 downloaded/healthy 的路径。
 
 ### 6.4 Phase D：异步传输与条件写
 
 目标：使读写 callback 具备生产级 deadline、取消和冲突安全。
 
 1. 将 fetch/create/modify/delete 生产路径切到 async backend。
-2. 实现 suspended/register/resume、单 item 单 task、streaming、progress 和 cancellation checkpoints。
+2. 实现 suspended/register/resume、单 item 单 task、streaming、progress、cancellation checkpoints 和 `awaiting_source_replay`。
 3. 运行 Cloudreve contract matrix，分别验证 collision-safe create、conditional modify、metadata move、zero-byte、chunk resume 和 provider callback。
 4. 按 operation 开启已验证 capability，不以单一总开关关闭或开放全部写入。
-5. 加入 macOS 26 原生 conflict 分支，以及旧系统 recovery storage、配额和 resolution lifecycle。
+5. 加入 macOS 26 原生 conflict 分支，以及旧系统 `requestModification(.contents)` source replay、用户可见导出和 resolution lifecycle。
 
-输出：async backend adapter、task registrar、upload recovery、conflict mapping 和旧系统 conflict recovery storage。
+输出：async backend adapter、task registrar、upload recovery、conflict mapping、`ConflictLocalSource` 和旧系统 conflict resolution adapter。
 
-进入条件：受控 Cloudreve 环境中的相应操作矩阵通过；未通过的 operation 保持 unsupported，其他已独立验证的安全 operation 不受影响。
+退出门禁：受控 Cloudreve 环境中的相应操作矩阵及 conflict source replay/export tests 通过；未通过的 operation 保持 unsupported，其他已独立验证的安全 operation 不受影响。
 
 ### 6.5 Phase E：父链、Trash、排除和 Finder Actions
 
 目标：补齐高风险边界与产品可用性。
 
 1. 实现 bounded parent recovery 和 directory move descendant refresh。
-2. 按首次 provisioning capability 实现 trash/restore/purge，并提供已有 Domain 的受控 reprovision。
+2. 按首次 provisioning capability 实现 trash/restore/purge；已有 Domain 的能力变化只提示用户显式 remove/re-add。
 3. 将 exclusion rule 接到 enumeration、reconciliation、create/modify/delete。
 4. 增加 tri-state keep policy、系统递归 evict 和 dynamic Finder actions。
 5. 确保 UI Extension 只使用 opaque action context。
 
 输出：ParentResolver、TrashEnumerator、ExclusionCoordinator、action predicates/UI routes。
 
-进入条件：`AC-FP-008` 至 `AC-FP-011` 通过；dirty-data、exclusion cleanup 和远端删除隔离有故障证据。
+退出门禁：`AC-FP-008` 至 `AC-FP-011` 通过；dirty-data、exclusion cleanup 和远端删除隔离有故障及 signed Finder 证据。
 
 ### 6.6 Phase F：版本刷新、实机和发布门禁
 
@@ -1048,7 +1077,7 @@ materialization/action boundary
 
 输出：`AC-FP-012` 证据、signed Finder report、long-run report、release readiness 更新。
 
-进入条件：无未解释的 callback loss、非幂等重复或错误删除；所有未验证能力在产品/UI 中保持降级状态。
+退出门禁：无未解释的 callback loss、非幂等重复或错误删除；所有未验证能力在产品/UI 中保持降级状态；第 7 节全部量化门槛和发布阻断项通过。
 
 ## 7. 验收标准总表
 
@@ -1057,14 +1086,14 @@ materialization/action boundary
 | 类别 | 必须证明 |
 |---|---|
 | 枚举 | working set、root、普通目录、trash 的初始和增量枚举正确；并发目录变化不造成 snapshot 漂移；page/cursor generation 有界 |
-| 变化交付 | 多 batch、continuation、旧 cursor 重放、Enumerator 重建和 Extension 重启不遗漏；重复 batch 确定且幂等 |
+| 变化交付 | 多 batch、sequence anchor、旧 anchor 重放、Enumerator 重建和 Extension 重启不遗漏；immutable delta 重复交付幂等 |
 | 内容 | 按需下载、完整校验、系统 eviction、tri-state Keep Downloaded、目录递归下载/释放状态一致 |
 | 写入 | create/modify/move/rename/trash/restore/delete 使用稳定 identity、条件版本、幂等 replay |
 | 冲突 | 条件写失败不覆盖；macOS 26 原生 conflict 或旧系统 Conflict Center fallback 可用 |
 | 父链 | missing parent bounded recovery、目录移动、父 404、深层 child 顺序安全 |
 | 排除 | remote view filter、不上传 local create、exclusion cleanup 与远端 delete 完全隔离 |
 | Action | non-UI/UI action predicate 与权限、状态、capability 一致，UI 不接触秘密 |
-| 特殊文件 | symlink、resource fork、xattr、hardlink、package 和 unsupported node 按保真矩阵处理，不静默损坏 |
+| 特殊文件 | symlink、resource fork、xattr、hardlink、package 和 unsupported node 按固定 1.0 策略处理，不静默损坏 |
 | 升级 | projection schema 变化可有界刷新，普通补丁升级不触发全量 callback，不重新下载未变化内容 |
 
 ### 7.2 故障与恢复
@@ -1076,11 +1105,13 @@ materialization/action boundary
 - URLSession timeout、断网、401/403/404/412/507、signed URL 失效；
 - SSE 断流、`resumed`、`reconnect-required`、事件重复、事件缺口；
 - page token/anchor 过期、journal compaction、schema generation 变化；
-- SQLite busy、损坏、迁移中断、App Group 不可用；
+- SQLite busy、损坏、v6→v7 迁移每个事务步骤前后中断、App Group 不可用；
 - Keychain locked、credential refresh 竞争、Domain 重复注册；
-- materialized/pending observer 中断或返回 capped set；
+- App/Extension 同时领取 system-set、lock owner 中断、旧 generation owner 恢复、materialized/pending observer 中断或返回 capped set；
+- upload source replay 缺失、fingerprint/generation 不匹配和 remote session 过期；
+- conflict `requestModification(.contents)` 未调度/重复调度、source generation/hash/size 不匹配、用户取消导出或重新选择错误文件；
 - exclusion rule 更新与用户删除、本地编辑、Domain removal 并发；
-- trash capability 变化与 Domain reprovision 中断；
+- trash capability 变化与用户显式 Domain remove/re-add 中断；
 - projection refresh fallback 中断、重复 callback 和 `.lastUsedDate` no-op 验证；
 - sleep/wake、用户禁用 File Provider、App 退出和重新启动。
 
@@ -1094,22 +1125,29 @@ committed / safely retried / explicit user action required / preserved dirty dat
 
 ### 7.3 性能与资源
 
-- 单个 directory page 和 change batch 始终遵守系统 suggested size 与实现上限。
-- 分页不把整棵远端树一次性加载到内存；working set 只查询明确成员，directory hydration 和 snapshot membership 以有界 page 写入 SQLite。
-- 内容传输以临时文件/stream 为边界，内存增长不随文件大小线性增长。
-- callback 不阻塞主线程；网络和数据库等待均有硬 deadline 或可取消路径。
-- directory snapshot、system-set staging 和 delivery session 均有 TTL、单 Domain 配额和可观测 compaction；磁盘不足时 fail closed。
-- 100,000 item metadata 场景下 page/cursor、journal compact、delivery resume 和 projection refresh 不发生无界内存、磁盘或 callback 增长。
-- 多 Domain scheduler 遵守公平并发上限；单个慢 Domain 不阻塞其他 Domain。
-- 长稳测试至少覆盖 72 小时或等价故障次数，并独立记录 CPU、内存、磁盘 cache、network retry 和 journal growth。
+以下延迟指标在 Release 配置、签名 Extension、10 次预热后至少 100 次采样；10 GB 传输和 72 小时长稳分别至少重复 3 次和执行 1 个完整周期。网络场景使用受控局域网 Cloudreve，纯本地场景使用 100,000 item/Domain、10,000 item/目录的数据集。报告 p50/p95/p99、最大值、设备/OS/Cloudreve/Provider 和 build commit：
+
+| 指标 | 通过门槛 |
+|---|---:|
+| 普通目录首屏 | 正常局域网 p95 ≤ 2 秒；有 complete snapshot 的本地命中 p95 ≤ 500 ms |
+| 纯本地 change enumeration | ≤ 4,000 个 delivered item 时 p95 ≤ 500 ms、p99 ≤ 1 秒；有效 `suggestedBatchSize > 0` 时取 `min(suggestedBatchSize, 4,000)`，否则使用 200，update/delete 共用该单批上限 |
+| system-set callback | 每次最多处理 4 个 system page 或占用 2 秒，以先达到者为准；保存 cursor/generation 后 completion，callback 总时长 p99 ≤ 3 秒 |
+| SQLite 竞争 | `busy_timeout` ≤ 3 秒；File Provider callback 单次 DB 等待 ≤ 3 秒，超时返回可恢复错误，不阻塞主线程 |
+| Extension 内存 | 常态 RSS 建议 ≤ 150 MB；10 GB 传输相对空闲基线额外 RSS ≤ 32 MB，且不随文件大小线性增长 |
+| journal payload | 单 row 编码硬上限 64 KiB；超限时整个 item/journal/outbox 事务失败并保留 producer retry，不能丢弃 delta；软保留覆盖最近 7 天与 100,000 条中较大范围，硬上限 1,000,000 条或 256 MiB |
+| snapshot/system-set 状态 | 单目录 snapshot membership 与 item 数量线性同阶；失败/旧 generation 可回收，不保留重复完整 payload |
+| 多 Domain 公平性 | 5 个 Domain 并发时，单个离线/慢 Domain 不使其他健康 Domain 的本地 callback p95 退化超过 20% |
+| 长稳 | 72 小时 signed Finder；无 callback loss、非幂等远端副作用、错误删除、无界 RSS/SQLite 增长 |
+
+内容传输必须以临时文件/stream 为边界。磁盘不足、payload 超限或 callback 达到预算时 fail closed 并保存可恢复状态，不能以扩大内存、返回部分完整状态或延长无界等待换取成功。
 
 ### 7.4 安全与隐私
 
 - Token、refresh credential、signed URL、upload callback secret 只进 Keychain/受控内存。
-- conflict recovery content 只进入受控 App Group 文件存储，使用最小权限、配额、hash 校验和 resolution 后清理；SQLite/日志不保存文件内容。
+- conflict 状态和用户导出引用可进入 App Group SQLite，但唯一 local content 只由系统 pending item 或用户明确选择的可见导出位置保存；App Group SQLite、内部缓存和日志不保存文件内容。
 - URL redirect 跨 origin 时清除 Authorization；signed storage URL 永不携带 Bearer。
 - Domain/item/page/anchor/深链不含 origin、账号、远端路径、文件名或 token。
-- anchor/page continuation 使用严格格式、范围校验和 integrity tag；随机篡改、跨 Domain/container 使用均 fail closed。
+- anchor/page continuation 使用严格格式、范围校验和 checksum；随机损坏、跨 Domain/container 使用均 fail closed。
 - 普通日志不写响应 body、SSE payload、文件内容、完整本地敏感路径。
 - UI Extension 不读取 SQLite/Keychain，不执行远端写入。
 - Release entitlements 不含 File Provider testing mode 或任意 HTTP 例外。
@@ -1135,13 +1173,18 @@ Unsigned Debug 或本地 unit test 不能替代 signed Finder、真实 Cloudreve
 
 | 风险 | 控制措施 |
 |---|---|
-| delivery session schema 错误 | 新 schema generation；迁移前 SQLite online backup/quick_check；无法迁移时 read-only；保留 journal/item 后再受控 fresh enumeration |
+| journal payload schema 错误 | 新 schema generation；迁移前 SQLite online backup/quick_check；无法迁移时 read-only；保留 item/operation 后再受控 fresh enumeration |
+| v6→v7 中断或 signal 丢失 | schema、epoch、sequence、reconcile 状态和新 signal intent 在同一事务提交；逐步骤 kill test 只允许完整 v6 或完整 v7 |
+| Swift/Rust schema 漂移 | Swift 是唯一生产 migration owner；Rust 不打开生产库；schema manifest parity test 阻断不一致构建 |
+| journal 重放不确定 | producer commit immutable payload 和安全 sequence 顺序；bounded scan 不越过未交付 relevant row；同一 anchor 重放相同 row/payload |
 | callback 内远端扫描过慢 | change callback 只消费本地 journal；reconciliation 是可恢复 producer job，完成后再 signal |
 | snapshot/staging 磁盘增长 | TTL、单目录/Domain 配额、索引和分代 compaction；磁盘不足不发布部分 generation |
 | Cloudreve 条件写不可靠 | capability gate 保持 unsupported；不以 preflight 查询冒充原子性 |
-| 旧系统冲突内容丢失 | callback 返回前流式写入 recovery storage；配额不足保留 dirty data；resolution commit 后才清理 |
+| upload checkpoint 缺少 source | 保持 `awaiting_source_replay`；系统重放 source 并验证 fingerprint 后才续传；v1 不在 completion 后盲传 |
+| 旧系统冲突内容丢失 | 默认依赖系统 pending item；无法证明可重放时要求用户先导出到可见位置；没有可恢复 local content 时阻断 overwrite/keep-both |
 | trash 路径/语义不稳定 | 先 contract test；未通过不启用 `supportsSyncingTrash` |
 | 系统 eviction/pending 状态丢失 | staging generation 原子发布；错误/capped 结果不清除上一代事实；重复回调幂等 |
+| system-set 双 worker 竞态 | Domain/set-kind advisory lock + claimed-generation fencing；旧 owner 不得写入或发布新 generation |
 | 排除 cleanup 误删远端 | exclusion intent 必须先提交并精确消费；无 intent 走保护性错误 |
 | projection cache refresh 过载 | 只在 projection schema 变化时刷新；优先 journal；`requestModification` fallback 有 scope、速率和 no-op 门禁 |
 | macOS 版本差异 | `#available` 分支；按 macOS 13/14/15/26 建 capability matrix |
@@ -1150,26 +1193,32 @@ Unsigned Debug 或本地 unit test 不能替代 signed Finder、真实 Cloudreve
 ### 8.2 回滚原则
 
 1. 新功能先由 capability/feature gate 控制，不能通过删除 Store 状态回滚。
-2. delivery/anchor 协议出现问题时递增 epoch，让系统重新枚举；保留 remote/local metadata，不批量删除。
+2. journal/anchor 协议出现问题时递增 epoch，让系统重新枚举；保留 remote/local metadata，不批量删除。
 3. async backend 出现问题时可回退到仅测试用同步 adapter；生产 callback 不回退到无限阻塞路径。
 4. conflict、trash、exclusion、evict 任一实机门禁失败时，回退为只读/unsupported，并保留 pending/dirty 数据。
-5. Domain removal 失败或状态不确定时保留 Domain record、Keychain reference 和 dirty-data recovery path，进入 repair required。
+5. Domain removal 失败或状态不确定时保留 Domain record、Keychain reference 和 dirty-data protection path，进入 repair required。
 
 ### 8.3 发布阻断项
 
 以下任一项未通过，不能把 1.0 标记为 Go：
 
 - working set/trash 初始与增量枚举未通过 signed Finder；
-- batch continuation 在 Extension 重启后遗漏，或重复 batch 产生非幂等副作用；
+- sequence anchor 在 Extension 重启后遗漏，或 immutable delta 重复交付产生非幂等副作用；
+- v6→v7 迁移可能产生半 schema、旧 anchor 假成功或缺失 fresh-enumeration signal；
+- Swift/Rust schema manifest 不一致，或存在第二个生产 migration owner；
 - anchor 过期被错误当作空变化；
 - materialized/eviction/pending 状态无法与系统集合对齐；
 - 部分/capped 系统集合被当作完整结果并清除状态；
+- App/Extension 双 worker 能覆盖 cursor、交叉 generation 或让旧 owner 发布结果；
 - conditional modify 未验证却开放覆盖既有内容的上传；
 - 特殊文件或 metadata 在未验证时被静默降级并造成数据损坏；
 - exclusion cleanup 可能进入 Cloudreve delete；
 - Domain removal 可能丢 dirty data；
 - Release 仍包含 testing entitlement/HTTP exception；
 - Provider upload/zero-byte/chunk resume 矩阵未完成；
+- upload source replay 缺失或不匹配时仍继续 remote part/commit；
+- 旧系统 conflict source 未通过 generation/hash/size 校验仍开放 overwrite/keep-both；
+- 第 7.3 节任一硬门槛未通过或缺少可复现报告；
 - 未完成公证、Gatekeeper、干净机器升级和长稳证据。
 
 ## 9. 交付物清单
@@ -1177,23 +1226,25 @@ Unsigned Debug 或本地 unit test 不能替代 signed Finder、真实 Cloudreve
 ### 9.1 代码交付物
 
 - `FileProviderContainerKind`、三类 Enumerator 和 page/anchor v2；
-- directory snapshot staging、immutable `fp_change_delivery_sessions/items` migration 与 StoreBridge；
-- `SystemSetCoordinator`、materialized/pending generation、item projection 和特殊文件策略；
+- directory snapshot staging、immutable `change_journal` payload migration、bounded sequence replay、journal fold 与 StoreBridge；
+- Swift/Rust schema manifest、parity test、唯一 migration owner 门禁和 v6→v7 kill-point fixture；
+- `SystemSetCoordinator`、现有 materialized/system-set 表的 generation 扩展、轻量 pending observation、item projection 和特殊文件策略；
 - `CloudreveAsyncBackend`、task registrar、streaming transfer、cancellation；
 - 条件写/conflict adapter、ParentResolver、TrashEnumerator；
-- conflict recovery storage、quota/orphan cleanup 和 resolution lifecycle；
+- `ConflictLocalSource`、`requestModification(.contents)` source replay、受协调用户导出和 resolution lifecycle；
 - `ExclusionCoordinator`、rule parser adapter、action predicates/UI routing；
 - `FrameworkCacheRefreshCoordinator`。
 
 ### 9.2 测试交付物
 
 - Swift File Provider 专项测试 target，而不是继续把所有测试集中在一个文件；
-- Enumerator/concurrent-page/anchor/integrity/immutable-delivery replay tests；
+- Enumerator/keyset/concurrent-page/anchor/checksum/immutable-journal replay tests；
 - materialized/pending partial/capped/eviction/property tests；
-- create/modify/delete/trash/conflict/upload recovery tests；
-- exclusion intent cleanup、parent recovery、directory move、Unicode/path 和特殊文件往返保真 tests；
+- create/modify/delete/trash/conflict/upload source-replay recovery tests，包括系统 pending 和用户导出两条 conflict source 路径；
+- exclusion intent cleanup、parent recovery、directory move、Unicode/path 和固定特殊文件策略 tests；
 - signed Finder callback replay、sleep/wake、upgrade/uninstall E2E；
 - Cloudreve capability/provider contract matrix 和 72 小时报告。
+- 第 7.3 节基准数据集、采样脚本和 p50/p95/p99 可复现报告。
 
 ### 9.3 文档交付物
 
@@ -1208,12 +1259,12 @@ Unsigned Debug 或本地 unit test 不能替代 signed Finder、真实 Cloudreve
 本方案完成的判定不是“12 个模块有代码”，而是同时满足：
 
 1. 12 个需求 ID 均有实现状态、测试名称、证据链接和 capability gate；
-2. 所有 callback 的关键状态都能在 SQLite 中恢复；相同 continuation 可确定性重放，重复交付无副作用；
+2. 所有 callback 的关键状态都能在 SQLite 中恢复；相同 sequence anchor 可重放相同 journal row/payload，重复交付无副作用；
 3. 所有系统可见 item 状态都能从远端事实 + 本地系统状态重建；
 4. 远端变化、系统 materialization、用户 mutation 和 Finder action 不互相伪造来源；
 5. 任何不确定结果都进入可恢复的 retry、reconciliation、conflict、preserve dirty data 或 user action required；
 6. signed Finder 和真实 Cloudreve 结果没有被本地 unit test 或 unsigned build 替代；
-7. 特殊文件和 metadata 在已验证矩阵内往返保真，矩阵外明确排除或拒绝；
+7. 特殊文件和 metadata 按固定 1.0 策略明确同步、排除或拒绝，不静默丢失语义；
 8. 许可证、密钥、日志、发布 entitlement 和删除安全检查全部通过。
 
 最终产品承诺为：在已验证的 Cloudreve/Provider/macOS 矩阵内，NimbusSync 提供稳定、可恢复的 Finder 云盘；未验证的能力明确显示为只读、不可用或需要用户处理，而不是静默降级为有数据风险的行为。
